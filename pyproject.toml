@@ -21,7 +21,7 @@ Repository = "https://github.com/stephaneberle9/skillship"
 dev = [
     "ty",
     "prek",
-    "ruff>=0.15,<0.16",  # keep in sync with the ruff-pre-commit rev in .pre-commit-config.yaml
+    "ruff>=0.17,<0.18",  # keep in sync with the ruff-pre-commit rev in .pre-commit-config.yaml
 ]
 test = [
     "pytest>=7.0.0",
