@@ -1,0 +1,56 @@
+name: Run static analysis
+
+env:
+  # Enable colored output
+  PY_COLORS: 1
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "uv.lock"
+      - "pyproject.toml"
+      - ".github/workflows/**"
+
+  # Run on all pull requests because these checks are required and will block merges otherwise
+  pull_request:
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static_analysis:
+    timeout-minutes: 2
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Check lockfile is up to date
+        run: |
+          if ! uv lock --check; then
+            echo "❌ Lockfile is out of date!"
+            echo "To update the lockfile, run 'uv lock'."
+            exit 1
+          fi
+          echo "✅ Lockfile is up to date"
+
+      # Installs prek and runs `prek run --all-files` on .pre-commit-config.yaml.
+      # Local hooks such as `uv run ty check` use the environment synced above.
+      - name: Run git hooks
+        uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
+        env:
+          SKIP: no-commit-to-branch

@@ -1,0 +1,89 @@
+[project]
+name = "skillship"
+dynamic = ["version"]
+description = "Resolve, lock and deliver curated subsets (\"distros\") of Agent Skills, with their declared dependencies, as zips, skill uploads or commits to a recipient's skill or plugin repository."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Stephan Eberle", email = "stephaneberle9@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+skillship = "skillship.cli:main"
+
+[project.urls]
+Repository = "https://github.com/stephaneberle9/skillship"
+
+[dependency-groups]
+dev = [
+    "ty",
+    "prek",
+    "ruff>=0.15,<0.16",  # keep in sync with the ruff-pre-commit rev in .pre-commit-config.yaml
+]
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning"]
+build-backend = "hatchling.build"
+
+[tool.uv-dynamic-versioning]
+enable = true
+vcs = "git"
+style = "pep440"
+fallback-version = "0.0.0"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.hatch.build.targets.wheel]
+sources = ["src"]
+exclude = ["*.log"]
+
+[tool.hatch.build.targets.sdist]
+sources = ["src"]
+exclude = ["*.log"]
+
+[tool.uv]
+default-groups = ["dev", "test"]
+
+[tool.ruff.lint]
+extend-select = ["I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "I001", "RUF013"]
+
+[tool.codespell]
+skip = "*.lock,pyproject.toml"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=skillship",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "**/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

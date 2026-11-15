@@ -1,0 +1,19 @@
+// Lint rules for this repository. Read by markdownlint-cli2 and by the
+// VS Code markdownlint extension alike.
+{
+  "default": true,
+
+  // Heading style: ATX (`#`, `##`, `###`) throughout.
+  "MD003": { "style": "atx" },
+
+  // Line length. Prose is wrapped at 80 columns; a table row or a code block
+  // cannot be wrapped without breaking it, so both are exempt.
+  "MD013": { "line_length": 80, "tables": false, "code_blocks": false },
+
+  // Duplicate headings are fine under different parents: parallel sections
+  // legitimately repeat subsection names such as "Prerequisites".
+  "MD024": { "siblings_only": true },
+
+  // One space inside each pipe: `| a | b |`.
+  "MD060": { "style": "compact" }
+}

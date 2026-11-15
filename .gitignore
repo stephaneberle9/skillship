@@ -1,0 +1,24 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv/
+
+# Log files
+*.log
+
+# Coverage reports
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Tool caches
+.ruff_cache/
+
+# Claude Code local settings (tool permissions, personal overrides — not shared)
+.claude/settings.local.json
