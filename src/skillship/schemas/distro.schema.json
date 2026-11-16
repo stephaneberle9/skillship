@@ -48,9 +48,9 @@
       "properties": {
         "shape": { "enum": ["skills", "plugins", "plugin"] },
         "root": {
-          "description": "Subdirectory inside the target that receives the tree.",
+          "description": "Subdirectory inside the target that receives the tree: a relative path without `..`.",
           "type": "string",
-          "minLength": 1
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
         },
         "name": {
           "description": "Name of the merged plugin, for shape `plugin`.",
@@ -109,7 +109,7 @@
               "name": {
                 "description": "File name of the zip, without `.zip`. Defaults to the distro name.",
                 "type": "string",
-                "pattern": "^[A-Za-z0-9._-]+$"
+                "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*$"
               }
             }
           }

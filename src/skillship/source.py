@@ -18,6 +18,7 @@ import yaml
 from skillship.errors import SkillshipError
 
 SHARED_DIR = "shared-material"
+SYMLINK_MODE = "120000"
 
 # Never delivered, whatever the profile says.
 GLOBAL_IGNORES = ("**/__pycache__/**", "**/*.pyc", "**/.pytest_cache/**")
@@ -110,10 +111,23 @@ class SourceRepo:
             found = [
                 p.relative_to(skill.path).as_posix()
                 for p in skill.path.rglob("*")
-                if p.is_file()
+                if p.is_file() or p.is_symlink()
             ]
         drop = [glob_to_regex(g) for g in (*GLOBAL_IGNORES, *excludes)]
-        return sorted(f for f in found if not any(r.fullmatch(f) for r in drop))
+        kept = sorted(f for f in found if not any(r.fullmatch(f) for r in drop))
+        for f in kept:
+            if self.is_symlink(prefix + f):
+                # a symlink would deliver whatever it points at, anywhere on the machine
+                raise SkillshipError(
+                    f"{prefix}{f} is a symlink; skillship does not deliver symlinks -- "
+                    "replace it with the file, or exclude it under `files.exclude`"
+                )
+        return kept
+
+    def is_symlink(self, relpath: str) -> bool:
+        if self._tracked is not None and self._tracked.get(relpath) == SYMLINK_MODE:
+            return True
+        return (self.root / relpath).is_symlink()
 
     def mode(self, relpath: str) -> int:
         """Unix permission bits for a repo file: 0o755 when git records it executable."""
@@ -191,8 +205,11 @@ def _git_files(root: Path) -> dict[str, str] | None:
     for entry in out.split("\0"):
         if entry:
             meta, path = entry.split("\t", 1)
-            if (root / path).is_file():  # deleted in the working tree: not deliverable
-                files[path] = meta.split()[0]
+            mode = meta.split()[0]
+            # a file deleted in the working tree is not deliverable; a symlink is
+            # kept, so that `files` can refuse it
+            if mode == SYMLINK_MODE or (root / path).is_file():
+                files[path] = mode
     return files
 
 

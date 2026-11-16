@@ -104,7 +104,11 @@ def resolve(repo: SourceRepo, profile: Profile) -> Resolution:
     for sid in res.skills:
         res.files[sid] = repo.files(repo.skills[sid], profile.file_excludes)
     if profile.license == "inherit":
-        res.extras = [f for f in LICENSE_FILES if (repo.root / f).is_file()]
+        res.extras = [
+            f
+            for f in LICENSE_FILES
+            if (repo.root / f).is_file() and not repo.is_symlink(f)
+        ]
 
     for sid in res.skills:
         for ref in repo.skills[sid].suggests:

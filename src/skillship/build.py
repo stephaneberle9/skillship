@@ -17,6 +17,7 @@ from typing import Any
 
 from skillship.errors import NotImplementedYet, SkillshipError
 from skillship.profile import BUILD_TARGETS_IMPLEMENTED, Profile
+from skillship.resolve import LICENSE_FILES
 from skillship.source import SourceRepo
 
 RECORD = ".skillship.json"
@@ -52,6 +53,11 @@ def build(
 
     base = out / profile.name
     staging = base / "staging"
+    for path in (out, base, staging):
+        if path.is_symlink():
+            raise SkillshipError(
+                f"{path} is a symlink; build writes only into a real directory"
+            )
     if staging.exists():
         shutil.rmtree(staging)
     record_files: dict[str, dict[str, str]] = {}
@@ -98,6 +104,10 @@ def _delivered(repo: SourceRepo, lock: dict[str, Any]) -> dict[str, str]:
             f"layout shape `{layout.get('shape')}` is not implemented yet"
         )
     root = PurePosixPath(layout.get("root", "."))
+    if root.is_absolute() or ".." in root.parts:
+        raise SkillshipError(
+            f"the lock's layout root `{root}` leaves the delivery tree"
+        )
     files: dict[str, str] = {}
     for entry in lock.get("skills", []):
         skill = repo.skills.get(entry["id"])
@@ -107,10 +117,18 @@ def _delivered(repo: SourceRepo, lock: dict[str, Any]) -> dict[str, str]:
             )
         for rel in entry["files"]:
             src = f"{repo.rel(skill.path)}/{rel}"
+            if ".." in PurePosixPath(rel).parts or repo.is_symlink(src):
+                raise SkillshipError(
+                    f"the lock ships `{src}`, which is not a plain file of the skill"
+                )
             if not (repo.root / src).is_file():
                 raise SkillshipError(f"the lock ships `{src}`, which does not exist")
             files[(root / "skills" / skill.name / rel).as_posix()] = src
     for extra in lock.get("extras", []):
+        if extra not in LICENSE_FILES or repo.is_symlink(extra):
+            raise SkillshipError(
+                f"the lock ships `{extra}`, which is no license file of the source repo"
+            )
         files[(root / extra).as_posix()] = extra
     return files
 

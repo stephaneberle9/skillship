@@ -67,9 +67,13 @@ FIXTURE = {
 }
 
 
-def git(root: Path, *args: str) -> str:
+def git(root: Path, *args: str, input: str | None = None) -> str:
     return subprocess.run(
-        ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+        input=input,
     ).stdout
 
 
@@ -81,14 +85,13 @@ def source(tmp_path: Path) -> Path:
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(text.encode())
+    setup = "plugins/ledger/skills/shared-material/scripts/setup.sh"
+    (root / setup).chmod(
+        0o755
+    )  # so a later `git add -A` keeps the bit where git honors file modes
     git(root.parent, "init", "-q", "-b", "main", str(root))
     git(root, "add", "-A")
-    git(
-        root,
-        "update-index",
-        "--chmod=+x",
-        "plugins/ledger/skills/shared-material/scripts/setup.sh",
-    )
+    git(root, "update-index", "--chmod=+x", setup)  # where it does not (Windows)
     git(
         root,
         "-c", "user.name=Test",

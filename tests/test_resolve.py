@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from conftest import skill_md, write_profile
+from conftest import git, skill_md, write_profile
 
 from skillship import profile
 from skillship.errors import NotImplementedYet, SkillshipError
@@ -231,3 +231,29 @@ def test_valid_but_unimplemented_profiles_exit_2(source, extra):
 )
 def test_glob_to_regex(glob, path, hit):
     assert bool(glob_to_regex(glob).fullmatch(path)) is hit
+
+
+def test_a_tracked_symlink_is_refused(source):
+    # a symlink as git records it (mode 120000), without needing the right to create one
+    blob = git(source, "hash-object", "-w", "--stdin", input="/etc/passwd").strip()
+    git(source, "update-index", "--add", "--cacheinfo",
+        f"120000,{blob},plugins/ledger/skills/tax-report/secrets")  # fmt: skip
+    write_profile(source, "acme", "recipient: ACME\ninclude: [ledger:tax-report]\n")
+    repo = SourceRepo(source)
+    with pytest.raises(SkillshipError, match="tax-report/secrets is a symlink"):
+        resolve(repo, profile.load(source, "acme"))
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "layout: {root: ../outside}\n",
+        "layout: {root: /abs}\n",
+        "layout: {root: a/../../b}\n",
+        "targets: [{type: archive, name: ..}]\n",
+    ],
+)
+def test_paths_that_leave_the_delivery_are_refused(source, extra):
+    write_profile(source, "acme", "recipient: A\ninclude: [x]\n" + extra)
+    with pytest.raises(SkillshipError, match="does not match"):
+        profile.load(source, "acme")
