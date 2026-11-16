@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/stephaneberle9/skillship/schemas/distro.schema.json",
+  "title": "skillship distro profile (distro.yaml)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["recipient", "include"],
+  "properties": {
+    "recipient": {
+      "description": "Who receives this distro, for people reading the profile.",
+      "type": "string",
+      "minLength": 1
+    },
+    "include": {
+      "description": "Skills to deliver, with everything they require. `plugin:glob` or a bare glob that matches a skill name in any plugin.",
+      "$ref": "#/$defs/patterns",
+      "minItems": 1
+    },
+    "exclude": {
+      "description": "Skills never to deliver. Resolving fails when an included skill is excluded or requires one.",
+      "$ref": "#/$defs/patterns"
+    },
+    "acknowledge": {
+      "description": "Skills a delivered file names that do not ship, accepted as they are.",
+      "$ref": "#/$defs/patterns"
+    },
+    "plugin-extras": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mcp": { "type": "boolean" },
+        "readme": { "type": "boolean" }
+      }
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "exclude": {
+          "description": "Globs, relative to each skill directory, of files never to deliver.",
+          "$ref": "#/$defs/patterns"
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shape": { "enum": ["skills", "plugins", "plugin"] },
+        "root": {
+          "description": "Subdirectory inside the target that receives the tree.",
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "description": "Name of the merged plugin, for shape `plugin`.",
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        }
+      },
+      "if": { "properties": { "shape": { "const": "plugin" } }, "required": ["shape"] },
+      "then": { "required": ["name"] }
+    },
+    "license": {
+      "description": "`inherit`, `none`, or an SPDX license identifier.",
+      "type": "string",
+      "minLength": 1
+    },
+    "version": { "enum": ["keep", "bump-patch"] },
+    "auto": { "type": "boolean" },
+    "upload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inline-shared": { "type": "boolean" }
+      }
+    },
+    "target-files": {
+      "description": "Opt out of a target-file set of the source repo with `<set>: false`.",
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "targets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/target" }
+    }
+  },
+  "$defs": {
+    "patterns": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "target": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": ["archive", "skill-upload", "plugin-upload", "agensi", "git"]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "archive" } } },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "type": true,
+              "name": {
+                "description": "File name of the zip, without `.zip`. Defaults to the distro name.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._-]+$"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["skill-upload", "plugin-upload", "agensi"] }
+            }
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": { "type": true }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "git" } } },
+          "then": {
+            "additionalProperties": false,
+            "required": ["url"],
+            "properties": {
+              "type": true,
+              "url": { "type": "string", "minLength": 1 },
+              "branch": { "type": "string", "minLength": 1 },
+              "mode": { "enum": ["push", "pull-request", "merge-request"] },
+              "forge": { "enum": ["github", "gitlab"] }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

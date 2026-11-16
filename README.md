@@ -9,10 +9,10 @@ marketplaces, and the skills it delivers run in Claude Code, Claude Cowork and
 any other Agent Skills–compatible agent.
 
 > [!NOTE]
-> skillship is in early development. The four commands exist and parse their
-> arguments, but none of them does its work yet: each prints
-> `not implemented yet` and exits with status 2. The `skillship` package on
-> PyPI is a placeholder that reserves the name.
+> skillship is in early development. `lock` and `build` work for the `skills`
+> layout and the `archive` target. The `plugins` and `plugin` layouts, upload
+> targets, `deliver` and `drift` are not implemented yet: a profile or command
+> that needs them is refused with exit status 2.
 
 - [What Is This For](#what-is-this-for)
 - [Installation](#installation)
@@ -110,7 +110,28 @@ skillship drift acme       # report what the recipient changed since the last de
 
 `lock` writes the exact set of skills and files a recipient receives, with the
 reason for each, into a lock file you commit. `build` and `deliver` read the
-lock and nothing else.
+lock and nothing else, and `build` refuses a lock that no longer matches the
+profile and the source repo.
+
+The lock lists file paths, not their content: editing the text of a delivered
+file leaves it unchanged, while adding, removing or renaming a file or a skill,
+or changing what a skill requires, changes it. `skillship lock --all --check`
+in CI therefore fails exactly when a commit changes what a recipient receives.
+
+`lock` also reports every mention of a skill that does not ship, in the
+delivered Markdown, outside `templates/` and `examples/`. A mention is
+`` `/skill` ``, `` `plugin:skill` `` or "the `` `skill` `` skill"; a bare
+backticked name counts as an illustration. Each mention gets a status:
+
+| Status | Meaning | Blocks the lock |
+| --- | --- | --- |
+| `suggested` | A shipped skill lists it under `suggests` | No |
+| `conditional` | The paragraph says "when installed" | No |
+| `acknowledged` | The profile lists it under `acknowledge:` | No |
+| `blocking` | None of the above | Yes |
+
+For a blocking mention, `lock` prints the profile edits that fix it: an
+`include:` entry, with the skills it would pull in, or an `acknowledge:` entry.
 
 ## Command Reference
 
@@ -123,6 +144,7 @@ lock and nothing else.
 | `skillship build <name> [--out DIR]` | Builds the staging tree and archives from the lock into `DIR` (default `dist/`) |
 | `skillship deliver <name> [--target T] [--dry-run]` | Runs the distro's targets, or one of them; `--dry-run` writes nothing |
 | `skillship drift <name>` | Reports recipient-side changes to delivered files and writes merge-back patches |
+| `skillship -C DIR …` | Uses `DIR` as the source repo instead of the git work tree around the current directory |
 | `skillship --version` | Prints the installed version |
 
 ## Contributing
