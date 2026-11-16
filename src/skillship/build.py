@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
+import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -142,7 +144,20 @@ def _normalized(data: bytes) -> bytes:
 
 def _zip(path: Path, contents: dict[str, tuple[bytes, int]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+    # Written to a fresh file and moved into place: `os.replace` swaps the
+    # directory entry, so a symlink planted at `path` is replaced, never followed.
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".", suffix=".zip.part")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            _write_zip(fh, contents)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def _write_zip(fh: Any, contents: dict[str, tuple[bytes, int]]) -> None:
+    with zipfile.ZipFile(fh, "w", zipfile.ZIP_DEFLATED) as zf:
         for name in sorted(contents):
             data, mode = contents[name]
             info = zipfile.ZipInfo(name, ZIP_EPOCH)

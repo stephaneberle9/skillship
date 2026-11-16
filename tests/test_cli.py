@@ -249,3 +249,20 @@ def test_build_skips_git_targets(source):
     )
     run(source, "lock", "acme")
     assert run(source, "build", "acme") == 0
+
+
+def test_build_replaces_a_symlink_at_the_archive_path_instead_of_following_it(
+    source, tmp_path
+):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me")
+    archive = source / "dist/acme/acme.zip"
+    archive.parent.mkdir(parents=True)
+    try:
+        archive.symlink_to(victim)
+    except OSError:
+        pytest.skip("this account cannot create symlinks")
+    built(source)
+    assert victim.read_text() == "keep me"
+    assert not archive.is_symlink()
+    assert zipfile.is_zipfile(archive)
