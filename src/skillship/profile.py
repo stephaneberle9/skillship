@@ -21,7 +21,6 @@ LOCK = "distro.lock.yaml"
 # What this version can resolve and build; everything else in the schema is
 # accepted, so a profile written for a later version stays valid, and refused
 # with exit status 2 when it is used.
-SHAPES_IMPLEMENTED = ("skills",)
 BUILD_TARGETS_IMPLEMENTED = ("archive",)
 
 
@@ -37,6 +36,9 @@ class Profile:
     file_excludes: list[str] = field(default_factory=list)
     shape: str = "skills"
     root: str = "."
+    plugin_name: str | None = None  # the merged plugin, shape `plugin`
+    plugin_description: str | None = None
+    marketplace: str | None = None
     license: str = "inherit"
     targets: list[dict[str, Any]] = field(default_factory=list)
     extras: dict[str, bool] = field(default_factory=dict)
@@ -90,24 +92,32 @@ def load(source_root: Path, name: str) -> Profile:
         file_excludes=data.get("files", {}).get("exclude", []),
         shape=layout.get("shape", "skills"),
         root=layout.get("root", "."),
+        plugin_name=layout.get("name"),
+        plugin_description=layout.get("description"),
+        marketplace=layout.get("marketplace"),
         license=data.get("license", "inherit"),
         targets=data.get("targets", []),
         extras=data.get("plugin-extras", {}),
     )
 
 
+def readme(profile: Profile) -> bool:
+    """Whether the delivery gets a generated README: always in the plugin shapes."""
+    where = f"{DISTROS_DIR}/{profile.name}/{PROFILE}"
+    if profile.shape in ("plugins", "plugin"):
+        if profile.extras.get("readme") is False:
+            raise SkillshipError(
+                f"{where}: shape `{profile.shape}` always generates a README per plugin, "
+                "because the source README lists skills that do not ship -- remove "
+                "`plugin-extras.readme: false`"
+            )
+        return True
+    return bool(profile.extras.get("readme", False))
+
+
 def require_implemented(profile: Profile) -> None:
     """Refuse, with exit status 2, a profile that needs what this version cannot resolve yet."""
     where = f"{DISTROS_DIR}/{profile.name}/{PROFILE}"
-    if profile.shape not in SHAPES_IMPLEMENTED:
-        raise NotImplementedYet(
-            f"{where}: layout shape `{profile.shape}` is not implemented yet"
-        )
-    for key, on in profile.extras.items():
-        if on:
-            raise NotImplementedYet(
-                f"{where}: `plugin-extras.{key}` is not implemented yet"
-            )
     if profile.license not in ("inherit", "none"):
         raise NotImplementedYet(
             f"{where}: `license: {profile.license}` is not implemented yet; use `inherit` or `none`"

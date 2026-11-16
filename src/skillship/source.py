@@ -8,6 +8,7 @@ one. A skill's id is `plugin:name`, or the bare name for a root skill.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -19,6 +20,11 @@ from skillship.errors import SkillshipError
 
 SHARED_DIR = "shared-material"
 SYMLINK_MODE = "120000"
+MANIFEST = ".claude-plugin/plugin.json"
+MARKETPLACE = ".claude-plugin/marketplace.json"
+
+# A plugin's non-skill files that `plugin-extras.mcp` delivers, relative to the plugin directory.
+MCP_EXTRAS = (".mcp.json", "CONNECTORS.md", "connectors/**")
 
 # Never delivered, whatever the profile says.
 GLOBAL_IGNORES = ("**/__pycache__/**", "**/*.pyc", "**/.pytest_cache/**")
@@ -134,6 +140,75 @@ class SourceRepo:
         if self._tracked is not None:
             return 0o755 if self._tracked.get(relpath) == "100755" else 0o644
         return 0o644
+
+    # -- plugins -----------------------------------------------------------
+
+    def plugin_dir(self, plugin: str | None) -> Path:
+        """The directory of a plugin; the repo root for the root skills."""
+        return self.root / "plugins" / plugin if plugin else self.root
+
+    def plugin_names(self) -> list[str]:
+        """The plugins under `plugins/`, sorted."""
+        base = self.root / "plugins"
+        return (
+            sorted(p.name for p in base.iterdir() if p.is_dir())
+            if base.is_dir()
+            else []
+        )
+
+    def home_plugin_name(self) -> str | None:
+        """The name of the plugin the root skills belong to: the root `plugin.json`'s, if any."""
+        name = self.manifest(None).get("name")
+        return name if isinstance(name, str) and name else None
+
+    def manifest(self, plugin: str | None) -> dict:
+        """A plugin's `plugin.json`, or {} when it has none."""
+        return self._json(self.plugin_dir(plugin) / MANIFEST)
+
+    def marketplace(self) -> dict:
+        """The source repo's `marketplace.json`, or {} when it has none."""
+        return self._json(self.root / MARKETPLACE)
+
+    def extras(self, plugin: str | None) -> list[str]:
+        """The MCP extras of a plugin, as repo-relative paths, sorted; git-tracked ones only."""
+        base = self.plugin_dir(plugin)
+        prefix = "" if base == self.root else self.rel(base) + "/"
+        wanted = [glob_to_regex(prefix + g) for g in MCP_EXTRAS]
+        drop = [glob_to_regex(g) for g in GLOBAL_IGNORES]
+        if self._tracked is not None:
+            found = list(self._tracked)
+        else:
+            found = [
+                self.rel(p)
+                for g in (".mcp.json", "CONNECTORS.md", "connectors")
+                for p in (
+                    [base / g] if not (base / g).is_dir() else (base / g).rglob("*")
+                )
+                if p.is_file()
+            ]
+        kept = sorted(
+            f
+            for f in found
+            if any(r.fullmatch(f) for r in wanted)
+            and not any(r.fullmatch(f) for r in drop)
+        )
+        for f in kept:
+            if self.is_symlink(f):
+                raise SkillshipError(
+                    f"{f} is a symlink; skillship does not deliver symlinks -- replace it with the file"
+                )
+        return kept
+
+    def _json(self, path: Path) -> dict:
+        if not path.is_file():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise SkillshipError(f"{self.rel(path)} is not valid JSON: {exc}") from exc
+        if not isinstance(data, dict):
+            raise SkillshipError(f"{self.rel(path)} is not a JSON object")
+        return data
 
     def rel(self, path: Path) -> str:
         return path.resolve().relative_to(self.root).as_posix()

@@ -9,10 +9,15 @@ ledger:ledger-rules            requires ledger-knowledge    (cycle)
 ledger:ledger-audit            names "the `tax-report` skill" (dangling when shipped)
 ledger:tax-report
 ledger:shared-material         scripts/setup.sh (executable)
+
+billing depends on ledger and on a plugin of another marketplace; ledger has
+MCP extras. invoice-knowledge names ledger skills in the forms flattening
+rewrites.
 """
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -32,8 +37,44 @@ def skill_md(name: str, requires: str = "", suggests: str = "", body: str = "") 
 
 FIXTURE = {
     "LICENSE": "MIT License\n",
+    ".claude-plugin/marketplace.json": json.dumps(
+        {
+            "name": "fixture",
+            "owner": {"name": "Fixture Owner"},
+            "plugins": [
+                {"name": "billing", "source": "./plugins/billing"},
+                {"name": "ledger", "source": "./plugins/ledger"},
+            ],
+        }
+    ),
+    "plugins/billing/.claude-plugin/plugin.json": json.dumps(
+        {
+            "name": "billing",
+            "description": "Billing skills.",
+            "author": {"name": "Fixture Owner"},
+            "repository": "https://example.invalid/source",
+            "license": "MIT",
+            "dependencies": ["ledger", "outside@other-market"],
+        }
+    ),
+    "plugins/ledger/.claude-plugin/plugin.json": json.dumps(
+        {
+            "name": "ledger",
+            "description": "Ledger skills.",
+            "author": {"name": "Fixture Owner"},
+            "license": "MIT",
+        }
+    ),
+    "plugins/ledger/.mcp.json": json.dumps(
+        {"mcpServers": {"books": {"command": "books-mcp"}}}
+    ),
+    "plugins/ledger/CONNECTORS.md": "# Connectors\n\nThe books server needs a token.\n",
+    "plugins/ledger/connectors/books.env": "BOOKS_TOKEN=\n",
     "plugins/billing/skills/invoice-knowledge/SKILL.md": skill_md(
-        "invoice-knowledge", requires="ledger:ledger-knowledge"
+        "invoice-knowledge",
+        requires="ledger:ledger-knowledge",
+        body="Post entries with `/ledger:ledger-knowledge`.\n\n"
+        "The rules live in the `ledger-rules` skill (`ledger` plugin).",
     ),
     "plugins/billing/skills/invoice-knowledge/references/vat.md": "# VAT\r\n\r\nRates.\r\n",
     "plugins/billing/skills/invoice-export/SKILL.md": skill_md(

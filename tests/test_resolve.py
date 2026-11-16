@@ -206,11 +206,7 @@ def test_invalid_profiles_are_refused(source, text, message):
 
 @pytest.mark.parametrize(
     "extra",
-    [
-        "layout: {shape: plugins}\n",
-        "plugin-extras: {mcp: true}\n",
-        "license: MIT\n",
-    ],
+    ["license: MIT\n", "license: Apache-2.0\n"],
 )
 def test_valid_but_unimplemented_profiles_exit_2(source, extra):
     write_profile(source, "acme", "recipient: A\ninclude: [x]\n" + extra)

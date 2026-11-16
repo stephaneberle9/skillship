@@ -56,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     lock.add_argument(
         "--explain",
         action="store_true",
-        help="print every flatten rewrite as a before/after line",
+        help="print every rewrite of the delivered copy as before/after lines",
     )
 
     build_cmd = commands.add_parser(
@@ -118,11 +118,6 @@ def _source_root(given: str | None) -> Path:
 
 
 def _lock(repo: SourceRepo, args: argparse.Namespace) -> int:
-    if args.explain:
-        print(
-            "skillship lock: --explain has nothing to show: flattening is not implemented yet",
-            file=sys.stderr,
-        )
     names = profile.distro_names(repo.root) if args.all else [args.name]
     if not names:
         raise SkillshipError(f"no distros under {repo.root / profile.DISTROS_DIR}")
@@ -132,6 +127,8 @@ def _lock(repo: SourceRepo, args: argparse.Namespace) -> int:
         profile.require_implemented(prof)
         res = resolve(repo, prof)
         _report(repo, prof, res)
+        if args.explain:
+            _explain(prof, res)
         check(res)
         text = lockfile.render(prof, res)
         if args.check:
@@ -153,7 +150,8 @@ def _lock(repo: SourceRepo, args: argparse.Namespace) -> int:
 
 def _report(repo: SourceRepo, prof: profile.Profile, res: Resolution) -> None:
     files = sum(len(f) for f in res.files.values()) + len(res.extras)
-    print(f"{prof.name}: {len(res.skills)} skills, {files} files")
+    generated = f", {len(res.generated)} generated" if res.generated else ""
+    print(f"{prof.name}: {len(res.skills)} skills, {files} files{generated}")
     if res.suggested:
         print("  suggested by a shipped skill, not shipped:")
         for ref, by in sorted(res.suggested.items()):
@@ -176,6 +174,36 @@ def _report(repo: SourceRepo, prof: profile.Profile, res: Resolution) -> None:
         )
         print(f"      include: [{ref}]{_adds(repo, res, ref)}")
         print(f"      acknowledge: [{ref}]")
+    if res.rewritten:
+        print(
+            f"  rewritten: {sum(res.rewritten.values())} rewrites in "
+            f"{len(res.rewritten)} files (`--explain` lists them)"
+        )
+    plugins = sorted({u.plugin for u in res.blocking_unflattened})
+    for plugin in plugins:
+        print(
+            f"  blocking: plugin `{plugin}` is named where flattening cannot rewrite it, at"
+        )
+        for u in res.blocking_unflattened:
+            if u.plugin == plugin:
+                print(f"      {u.at}")
+        print(
+            '    reword the mention in the source ("the `skill` skill (`plugin` plugin)" '
+            "is flattened), or accept it as it is:"
+        )
+        print(f"      acknowledge: [{plugin}]")
+
+
+def _explain(prof: profile.Profile, res: Resolution) -> None:
+    if not res.rewrites:
+        print("  the delivered copy is not rewritten")
+    for path, rewrites in sorted(res.rewrites.items()):
+        for r in rewrites:
+            print(f"  {path}:{r.line}")
+            for line in r.before.split("\n"):
+                print(f"    - {line}")
+            for line in r.after.split("\n"):
+                print(f"    + {line}")
 
 
 def _adds(repo: SourceRepo, res: Resolution, ref: str) -> str:

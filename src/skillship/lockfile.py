@@ -28,17 +28,42 @@ def lock_path(source_root: Path, name: str) -> Path:
 
 
 def render(profile: Profile, res: Resolution) -> str:
+    layout: dict[str, Any] = {"shape": profile.shape, "root": profile.root}
+    if profile.shape == "plugin":
+        layout["name"] = profile.plugin_name
+    if profile.shape in ("plugins", "plugin"):
+        layout["marketplace"] = profile.marketplace or profile.name
     data: dict[str, Any] = {
         "lock-version": VERSION,
         "profile-digest": profile.digest,
-        "layout": {"shape": profile.shape, "root": profile.root},
+        "layout": layout,
         "skills": [
             {"id": sid, "reason": res.skills[sid], "files": res.files[sid]}
             for sid in sorted(res.skills)
         ],
     }
     if res.extras:
-        data["extras"] = list(res.extras)
+        data["extras"] = sorted(res.extras)
+    if res.plugins:
+        plugins = []
+        for p in res.plugins:
+            entry: dict[str, Any] = {"name": p.name}
+            if p.sources != [p.name]:
+                entry["from"] = p.sources
+            if p.description:
+                entry["description"] = p.description
+            entry["dependencies"] = p.dependencies
+            plugins.append(entry)
+        data["plugins"] = plugins
+    if res.generated:
+        data["generated"] = list(res.generated)
+    if res.rewritten:
+        data["rewritten"] = dict(sorted(res.rewritten.items()))
+    if res.unflattened:
+        data["unflattened"] = [
+            {"plugin": u.plugin, "at": u.at, "status": u.status}
+            for u in sorted(res.unflattened, key=lambda u: (u.plugin, u.at))
+        ]
     if res.suggested:
         data["suggested"] = [
             {"ref": ref, "by": sorted(by)} for ref, by in sorted(res.suggested.items())

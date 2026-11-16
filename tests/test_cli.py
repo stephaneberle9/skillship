@@ -139,16 +139,74 @@ def test_lock_all_without_distros_fails(source, capsys):
     assert "no distros under" in capsys.readouterr().err
 
 
-def test_an_unimplemented_shape_exits_2(source, capsys):
-    write_profile(source, "acme", PROFILE + "layout: {shape: plugins}\n")
+def test_an_unimplemented_license_exits_2(source, capsys):
+    write_profile(source, "acme", PROFILE + "license: MIT\n")
     assert run(source, "lock", "acme") == 2
     assert "not implemented yet" in capsys.readouterr().err
 
 
-def test_explain_says_there_is_nothing_to_explain_yet(source, capsys):
+def test_explain_prints_each_rewrite_before_and_after(source, capsys):
     write_profile(source, "acme", PROFILE)
     assert run(source, "lock", "acme", "--explain") == 0
-    assert "flattening is not implemented yet" in capsys.readouterr().err
+    out = capsys.readouterr().out
+    assert "rewritten: 5 rewrites in 2 files" in out
+    assert (
+        "  plugins/billing/skills/invoice-knowledge/SKILL.md:11\n"
+        "    - Post entries with `/ledger:ledger-knowledge`.\n"
+        "    + Post entries with `/ledger-knowledge`.\n"
+    ) in out
+    assert (
+        "    - The rules live in the `ledger-rules` skill (`ledger` plugin).\n"
+        "    + The rules live in the `ledger-rules` skill.\n"
+    ) in out
+
+
+def test_shape_plugins_only_prunes_suggests(source, capsys):
+    write_profile(source, "acme", PROFILE + "layout: {shape: plugins}\n")
+    assert run(source, "lock", "acme", "--explain") == 0
+    out = capsys.readouterr().out
+    assert "rewritten: 1 rewrites in 1 files" in out
+    assert (
+        "  plugins/billing/skills/invoice-export/SKILL.md:8\n"
+        "    -   suggests: >-\n"
+        "    -     ledger:ledger-audit\n"
+        "    + \n"
+    ) in out
+
+
+def test_an_unflattened_plugin_mention_blocks_until_acknowledged(source, capsys):
+    path = source / "plugins/billing/skills/invoice-export/references/notes.md"
+    path.parent.mkdir()
+    path.write_text("Setup lives in the `ledger` plugin's CONNECTORS.md.\n")
+    git(source, "add", "-A")
+    write_profile(source, "acme", PROFILE)
+    assert run(source, "lock", "acme") == 1
+    captured = capsys.readouterr()
+    assert (
+        "blocking: plugin `ledger` is named where flattening cannot rewrite it"
+        in captured.out
+    )
+    assert "acknowledge: [ledger]" in captured.out
+    assert (
+        "billing:invoice-export/references/notes.md:1: names plugin `ledger`"
+        in captured.err
+    )
+    write_profile(source, "acme", PROFILE + "acknowledge: [ledger]\n")
+    assert run(source, "lock", "acme") == 0
+    assert (
+        "unflattened:\n- plugin: ledger\n"
+        "  at: billing:invoice-export/references/notes.md:1\n"
+        "  status: acknowledged\n"
+    ) in lock_text(source)
+
+
+def test_a_stale_plugin_acknowledge_fails(source, capsys):
+    write_profile(source, "acme", PROFILE + "acknowledge: [ledger]\n")
+    assert run(source, "lock", "acme") == 1
+    assert (
+        "`acknowledge: ledger` matches no unflattened mention"
+        in capsys.readouterr().err
+    )
 
 
 # -- build -------------------------------------------------------------------

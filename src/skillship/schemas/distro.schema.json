@@ -28,8 +28,14 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "mcp": { "type": "boolean" },
-        "readme": { "type": "boolean" }
+        "mcp": {
+          "description": "Deliver each shipping plugin's `.mcp.json`, `CONNECTORS.md` and `connectors/`.",
+          "type": "boolean"
+        },
+        "readme": {
+          "description": "Generate a README listing the shipped skills; always on in the plugin shapes.",
+          "type": "boolean"
+        }
       }
     },
     "files": {
@@ -54,6 +60,16 @@
         },
         "name": {
           "description": "Name of the merged plugin, for shape `plugin`.",
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "description": {
+          "description": "Description of the merged plugin, for shape `plugin`.",
+          "type": "string",
+          "minLength": 1
+        },
+        "marketplace": {
+          "description": "Name of the generated marketplace, for shapes `plugins` and `plugin`. Defaults to the distro name.",
           "type": "string",
           "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
         }

@@ -9,10 +9,10 @@ marketplaces, and the skills it delivers run in Claude Code, Claude Cowork and
 any other Agent Skills–compatible agent.
 
 > [!NOTE]
-> skillship is in early development. `lock` and `build` work for the `skills`
-> layout and the `archive` target. The `plugins` and `plugin` layouts, upload
-> targets, `deliver` and `drift` are not implemented yet: a profile or command
-> that needs them is refused with exit status 2.
+> skillship is in early development. `lock` and `build` work for all three
+> layouts and the `archive` target. Upload targets, license ids other than
+> `inherit` and `none`, `deliver` and `drift` are not implemented yet: a
+> profile or command that needs them is refused with exit status 2.
 
 - [What Is This For](#what-is-this-for)
 - [Installation](#installation)
@@ -99,6 +99,25 @@ targets:
     mode: pull-request
 ```
 
+The layout shape decides how the delivered tree looks:
+
+| Shape | Delivered tree |
+| --- | --- |
+| `skills` | `skills/<skill>/`, every skill side by side, without plugins |
+| `plugins` | `plugins/<plugin>/` per source plugin that ships a skill, each with a generated `plugin.json` and README, and a `.claude-plugin/marketplace.json` listing them |
+| `plugin` | One plugin, `plugins/<name>/`, merging every shipped skill, with its `plugin.json`, README and `marketplace.json` |
+
+A generated `plugin.json` keeps the source plugin's fields except `repository`,
+`homepage` and component paths, and its `dependencies` name only plugins that
+ship, plus those of other marketplaces. `layout.root` puts the tree in a
+subdirectory, `layout.marketplace` names the marketplace (default: the distro
+name), and `layout.name` and `layout.description` describe the merged plugin.
+
+`plugin-extras.mcp: true` delivers each shipping plugin's `.mcp.json`,
+`CONNECTORS.md` and `connectors/`, merged where the shape merges plugins.
+`plugin-extras.readme: true` adds a README listing the skills to the `skills`
+shape; the plugin shapes always generate one per plugin.
+
 ### Lock, build and deliver
 
 ```bash
@@ -133,6 +152,29 @@ backticked name counts as an illustration. Each mention gets a status:
 For a blocking mention, `lock` prints the profile edits that fix it: an
 `include:` entry, with the skills it would pull in, or an `acknowledge:` entry.
 
+`build` rewrites the delivered copy, never the source, and the lock counts the
+rewrites per file; `skillship lock --explain` prints each one:
+
+- A delivered `SKILL.md` keeps only the `metadata.suggests` entries that ship.
+- In the `skills` and `plugin` shapes, plugin-qualified names are flattened,
+  because the source plugins no longer exist: `/plugin:skill` becomes `/skill`
+  (or `/<name>:skill` in the merged plugin). An attribution after a skill's
+  name loses its plugin (or names the merged plugin): "(`` `plugin` ``
+  plugin)", "(`` `plugin` `` plugin, when installed)", "(`` `plugin` ``)",
+  "…, `` `plugin` `` plugin)" and ", from the `` `plugin` `` plugin when
+  installed". Only names of skills that ship are rewritten.
+
+Any other mention of a source plugin in a flattened delivery blocks the lock,
+since rewriting it would mean guessing. Reword it in the source, or list the
+plugin's name under `acknowledge:` to deliver the mention as it is.
+
+A relative link in delivered Markdown that resolves in the source repo but not
+in the delivered tree blocks the lock too, for example a skill linking its
+plugin's `CONNECTORS.md` while the MCP extras do not ship. `lock` names the fix:
+the `include:` or `plugin-extras` entry that ships the target, or a rewording
+of the link in the source. Links in `templates/` and `examples/` are not
+checked.
+
 ## Command Reference
 
 | Command | Description |
@@ -140,7 +182,7 @@ For a blocking mention, `lock` prints the profile edits that fix it: an
 | `skillship lock <name>` | Resolves a distro's profile into its lock file and reports references that would dangle |
 | `skillship lock --all` | Does the same for every distro of the source repo |
 | `skillship lock … --check` | Fails when a lock is stale instead of rewriting it; meant for CI |
-| `skillship lock … --explain` | Prints every rewrite of a plugin-qualified skill name as a before/after line |
+| `skillship lock … --explain` | Prints every rewrite of the delivered copy as before/after lines |
 | `skillship build <name> [--out DIR]` | Builds the staging tree and archives from the lock into `DIR` (default `dist/`) |
 | `skillship deliver <name> [--target T] [--dry-run]` | Runs the distro's targets, or one of them; `--dry-run` writes nothing |
 | `skillship drift <name>` | Reports recipient-side changes to delivered files and writes merge-back patches |
