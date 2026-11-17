@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from skillship import config, gitops
+from skillship import ci, config, gitops
 from skillship.build import normalized
 from skillship.deliver import (
     Drifted,
@@ -61,7 +61,8 @@ def drift_report(
     tmp = Path(tempfile.mkdtemp(prefix="skillship-"))
     try:
         clone = tmp / "target"
-        gitops.clone(target["url"], target.get("branch"), clone)
+        with ci.credentials(target["url"], forge):
+            gitops.clone(target["url"], target.get("branch"), clone)
         record = read_record(clone, profile.name)
         drifted = drift(clone, record)
         if not drifted:

@@ -303,3 +303,15 @@ def test_build_replaces_a_symlink_at_the_archive_path_instead_of_following_it(
     assert victim.read_text() == "keep me"
     assert not archive.is_symlink()
     assert zipfile.is_zipfile(archive)
+
+
+def test_list_names_the_distros_for_ci(source, capsys):
+    write_profile(source, "acme", PROFILE)
+    write_profile(source, "beta-co", PROFILE + "auto: true\n")
+    assert run(source, "list") == 0
+    assert capsys.readouterr().out.split() == ["acme", "beta-co"]
+    assert run(source, "list", "--auto", "--json") == 0
+    rows = json.loads(capsys.readouterr().out)
+    assert rows == [
+        {"name": "beta-co", "key": "BETA_CO", "auto": True, "targets": ["archive"]}
+    ]

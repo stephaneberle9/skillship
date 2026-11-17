@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import json
+import re
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -99,6 +101,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="output directory of archive targets (default: dist/ in the source repo)",
     )
 
+    listing = commands.add_parser(
+        "list", help="list the distros of the source repo, for scripts and CI"
+    )
+    listing.add_argument(
+        "--auto", action="store_true", help="only the distros marked `auto: true`"
+    )
+    listing.add_argument(
+        "--json",
+        action="store_true",
+        help="print a JSON array of {name, key, auto, targets}; `key` is the name "
+        "as a secret-name part (upper case, `_` for `-`)",
+    )
+
     drift = commands.add_parser(
         "drift", help="report recipient-side changes and write merge-back patches"
     )
@@ -121,6 +136,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _deliver(repo, args)
         if args.command == "drift":
             return _drift(repo, args)
+        if args.command == "list":
+            return _list(repo, args)
         return _build(repo, args)
     except SkillshipError as exc:
         print(f"skillship {args.command}: {exc}", file=sys.stderr)
@@ -352,6 +369,28 @@ def _deliver(repo: SourceRepo, args: argparse.Namespace) -> int:
             )
             for line in outcome.lines:
                 print(line)
+    return 0
+
+
+def _list(repo: SourceRepo, args: argparse.Namespace) -> int:
+    rows = []
+    for name in profile.distro_names(repo.root):
+        prof = profile.load(repo.root, name)
+        if args.auto and not prof.auto:
+            continue
+        rows.append(
+            {
+                "name": name,
+                "key": re.sub(r"[^A-Z0-9]", "_", name.upper()),
+                "auto": prof.auto,
+                "targets": [t["type"] for t in prof.targets],
+            }
+        )
+    if args.json:
+        print(json.dumps(rows))
+    else:
+        for row in rows:
+            print(row["name"])
     return 0
 
 

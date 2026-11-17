@@ -340,6 +340,64 @@ the recipient already has, and `deliver` no longer stops on that file; the
 same goes for a deleted file that no longer ships. To discard a recipient's
 change instead, deliver with `--overwrite PATH`.
 
+### Deliver from CI
+
+The reusable workflow `.github/workflows/distro.yml` delivers from GitHub
+Actions. Call it from the source repo, pinned to a skillship release, and pin
+the CLI version in `distros/.skillship-version`:
+
+```yaml
+# .github/workflows/distros.yml
+name: Deliver distros
+on:
+  workflow_dispatch:
+    inputs:
+      distro: { type: string, default: "" }
+      dry-run: { type: boolean, default: true }
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  deliver:
+    uses: stephaneberle9/skillship/.github/workflows/distro.yml@v0.5.0
+    with:
+      distro: ${{ inputs.distro || '' }}
+      dry-run: ${{ inputs.dry-run || false }}
+      auto-only: ${{ github.event_name == 'push' }}
+    secrets: inherit
+```
+
+A run from the Actions tab delivers one distro or all; a push to `main`
+delivers the distros whose profile says `auto: true`. Each distro gets its own
+job. Archive and upload targets become a workflow artifact, and the output goes
+into the job summary.
+
+A `git` target needs credentials, which no CI runner has. `deliver` and
+`drift` read them from environment variables, and the workflow fills those
+from secrets and variables named per distro, with `KEY` the distro's name
+upper-cased and `_` for `-` (`acme-billing` → `ACME_BILLING`):
+
+| Name | Kind | Holds |
+| --- | --- | --- |
+| `DISTRO_<KEY>_DEPLOY_TOKEN` | secret | A token with write access to the target repo: on GitHub a fine-grained personal access token or a GitHub App token, on GitLab a project access token (or a deploy token for `push` mode). Sent to git as an `Authorization` header for the target's host only, and to `gh` or `glab` |
+| `DISTRO_<KEY>_DEPLOY_USER` | variable | The token's user name, if it needs one: a GitLab deploy token's. Defaults to `x-access-token` on GitHub, `oauth2` on GitLab |
+| `DISTRO_<KEY>_SIGNING_KEY` | secret | An OpenSSH or an armored GPG private key, which signs the delivery commit |
+| `DISTRO_<KEY>_SIGNING_KEY_PASSPHRASE` | secret | The key's passphrase, if it has one |
+| `DISTRO_<KEY>_COMMITTER_NAME`, `DISTRO_<KEY>_COMMITTER_EMAIL` | variable | Who the commit is by |
+
+Each falls back to the same name without `<KEY>_`, for settings all distros
+share. The forge shows the commit as verified when the key's public half is
+registered as a signing key with an account that holds the committer's
+email; a `users.noreply` address of that account works. With the input
+`environments: true`, each job runs in the GitHub environment
+`distro-<name>`, whose secrets serve as the unprefixed names and whose
+required reviewers gate the delivery. Environments need a public repository,
+or a paid plan for a private one.
+
+The gate runs without these variables, and the token is never written to a
+file or a command line.
+
 ## Command Reference
 
 | Command | Description |
@@ -352,6 +410,7 @@ change instead, deliver with `--overwrite PATH`.
 | `skillship deliver <name> [--target TYPE] [--dry-run]` | Runs the distro's targets, or those of one type; `--dry-run` pushes nothing and builds no archive |
 | `skillship deliver … --overwrite PATH` | Replaces a delivered file the recipient changed; repeatable |
 | `skillship drift <name> [--out DIR]` | Reports recipient-side changes to delivered files and writes merge-back patches to `DIR/<name>/drift/` |
+| `skillship list [--auto] [--json]` | Lists the distros, or those marked `auto: true`; `--json` adds each one's secret-name key and target types |
 | `skillship -C DIR …` | Uses `DIR` as the source repo instead of the git work tree around the current directory |
 | `skillship --version` | Prints the installed version |
 

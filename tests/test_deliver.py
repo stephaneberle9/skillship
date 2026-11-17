@@ -8,8 +8,10 @@ SSH key through an isolated global git configuration.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -24,6 +26,8 @@ GATE = """\
 import pathlib, subprocess, sys
 target, base = sys.argv[1:]
 assert pathlib.Path("distros/skillship.yaml").is_file(), "the gate runs in the source repo"
+import os
+assert not [k for k in os.environ if k.startswith("DISTRO_")], "the gate gets no credentials"
 subprocess.run(["git", "-C", target, "rev-parse", "--verify", base], check=True, capture_output=True)
 bad = [p for p in pathlib.Path(target, "plugins").rglob("*") if p.is_file() and "FAIL-GATE" in p.read_text()]
 sys.exit(1 if bad else 0)
@@ -647,3 +651,142 @@ def test_a_record_naming_no_exact_ancestor_rebuilds_nothing(
     assert base_delivery(
         repo, prof, {"source": f"{repo.name()}@{sha}"}, "github", tmp_path / "ok"
     )
+
+
+# -- CI credentials -----------------------------------------------------------
+
+
+def ci_env(monkeypatch: pytest.MonkeyPatch, key: str, passphrase: str) -> None:
+    monkeypatch.setenv("DISTRO_SIGNING_KEY", key)
+    monkeypatch.setenv("DISTRO_SIGNING_KEY_PASSPHRASE", passphrase)
+    monkeypatch.setenv("DISTRO_COMMITTER_NAME", "Distro Bot")
+    monkeypatch.setenv("DISTRO_COMMITTER_EMAIL", "bot@example.invalid")
+
+
+def test_ci_signs_with_a_passphrase_protected_ssh_key(
+    distro: Path, target: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    key = tmp_path / "ci-key"
+    subprocess.run(
+        [
+            "ssh-keygen",
+            "-q",
+            "-t",
+            "ed25519",
+            "-N",
+            "s3cret",
+            "-C",
+            "ci",
+            "-f",
+            str(key),
+        ],
+        check=True,
+    )
+    ci_env(monkeypatch, key.read_text(), "s3cret")
+    assert run(distro, "deliver", "acme") == 0
+    work = checkout(target, tmp_path / "check")
+    raw = git(work, "cat-file", "commit", "HEAD")
+    assert "-----BEGIN SSH SIGNATURE-----" in raw
+    assert "author Distro Bot <bot@example.invalid>" in raw
+    signers = tmp_path / "allowed"
+    signers.write_text(f"bot@example.invalid {key.with_suffix('.pub').read_text()}")
+    git(
+        work,
+        "-c",
+        f"gpg.ssh.allowedSignersFile={signers.as_posix()}",
+        "verify-commit",
+        "HEAD",
+    )
+
+
+def test_ci_signs_with_a_passphrase_protected_gpg_key(
+    distro: Path, target: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # short: the gpg-agent socket lives in it, and its path has a length limit
+    home = Path(tempfile.mkdtemp(prefix="gpg-"))
+    from skillship.ci import gpg_home
+
+    env = {**os.environ, "GNUPGHOME": gpg_home(home)}
+    gpg = ["gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "s3cret"]
+    try:
+        subprocess.run(
+            [*gpg, "--quick-gen-key", "Distro Bot <bot@example.invalid>", "ed25519", "sign", "never"],
+            env=env, check=True, capture_output=True,
+        )  # fmt: skip
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("gpg cannot generate a key here")
+    secret = subprocess.run(
+        [*gpg, "--armor", "--export-secret-keys"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    subprocess.run(["gpgconf", "--kill", "gpg-agent"], env=env, check=False)
+    ci_env(monkeypatch, secret, "s3cret")
+    assert run(distro, "deliver", "acme") == 0
+    work = checkout(target, tmp_path / "check")
+    raw = git(work, "cat-file", "commit", "HEAD")
+    assert "-----BEGIN PGP SIGNATURE-----" in raw
+    assert "committer Distro Bot <bot@example.invalid>" in raw
+    done = subprocess.run(
+        ["git", "-C", str(work), "verify-commit", "HEAD"],
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+    subprocess.run(["gpgconf", "--kill", "gpg-agent"], env=env, check=False)
+    assert done.returncode == 0, done.stderr
+
+
+def test_ci_needs_a_committer_for_its_key(
+    distro: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+):
+    monkeypatch.setenv("DISTRO_SIGNING_KEY", "-----BEGIN OPENSSH PRIVATE KEY-----\nx\n")
+    assert run(distro, "deliver", "acme") == 1
+    assert (
+        "DISTRO_COMMITTER_NAME or DISTRO_COMMITTER_EMAIL is not"
+        in capsys.readouterr().err
+    )
+
+
+def test_ci_refuses_an_unknown_key(
+    distro: Path, monkeypatch: pytest.MonkeyPatch, capsys
+):
+    ci_env(monkeypatch, "not a key", "")
+    assert run(distro, "deliver", "acme") == 1
+    assert "neither an OpenSSH private key" in capsys.readouterr().err
+
+
+def test_ci_token_goes_to_git_as_a_header_for_the_target_host(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import base64
+
+    from skillship import ci, gitops
+
+    monkeypatch.setenv("DISTRO_DEPLOY_TOKEN", "t0ken")
+    with ci.credentials(
+        "https://gitlab.example.com/acme/plugins.git", "gitlab"
+    ) as args:
+        env = dict(gitops.EXTRA_ENV)
+    assert args == [] and not gitops.EXTRA_ENV
+    assert env["GIT_CONFIG_KEY_0"] == "http.https://gitlab.example.com/.extraHeader"
+    assert (
+        env["GIT_CONFIG_VALUE_0"]
+        == "Authorization: Basic " + base64.b64encode(b"oauth2:t0ken").decode()
+    )
+    assert env["GITLAB_TOKEN"] == "t0ken" and env["GITLAB_HOST"] == "gitlab.example.com"
+    with ci.credentials("https://github.com/acme/plugins.git", "github"):
+        assert gitops.EXTRA_ENV["GH_TOKEN"] == "t0ken"
+        assert (
+            "x-access-token"
+            in base64.b64decode(
+                gitops.EXTRA_ENV["GIT_CONFIG_VALUE_0"].split()[-1]
+            ).decode()
+        )
+    with (
+        pytest.raises(SkillshipError, match="authenticates over HTTPS"),
+        ci.credentials("git@github.com:acme/plugins.git", "github"),
+    ):
+        pass

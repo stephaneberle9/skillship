@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from skillship import config, gitops, lockfile
+from skillship import ci, config, gitops, lockfile
 from skillship import profile as profile_mod
 from skillship.build import RECORD, DeliveredFile, delivered, json_bytes, normalized
 from skillship.errors import SkillshipError
@@ -275,6 +275,25 @@ def deliver_git(
     dry_run: bool = False,
     overwrite: list[str] | None = None,
 ) -> Outcome:
+    """Deliver into one `git` target, with the CI credentials when they are set (see `ci`)."""
+    with ci.credentials(target["url"], config.forge_of(target)) as ci_ident:
+        # the CI identity and key come last, so they win over the source repo's
+        ident = identity(repo.root) + (ci_ident or [])
+        return _deliver_git(
+            repo, profile, lock, lock_digest, target, dry_run, overwrite, ident
+        )
+
+
+def _deliver_git(
+    repo: SourceRepo,
+    profile: Profile,
+    lock: dict[str, Any],
+    lock_digest: str,
+    target: dict[str, Any],
+    dry_run: bool,
+    overwrite: list[str] | None,
+    ident: list[str],
+) -> Outcome:
     out = Outcome()
     forge = config.forge_of(target)
     mode = target.get("mode", "push")
@@ -350,7 +369,7 @@ def deliver_git(
             changed,
             out.seeded,
             sign=not dry_run,
-            ident=identity(repo.root),
+            ident=ident,
         )
         for name, command in new.gates:
             _gate(repo.root, clone, name, command, f"origin/{branch}")
@@ -753,7 +772,8 @@ def _gate(root: Path, clone: Path, name: str, command: str, base: str) -> None:
     ]
     print(f"gate `{name}`: {shlex.join(argv)}", flush=True)
     try:
-        done = subprocess.run(argv, cwd=root, check=False)
+        # the gate is the source repo's code and needs no credentials
+        done = subprocess.run(argv, cwd=root, env=ci.scrubbed_env(), check=False)
     except OSError as exc:
         raise SkillshipError(f"cannot run the `{name}` gate: {exc}") from exc
     if done.returncode != 0:

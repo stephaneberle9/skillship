@@ -46,6 +46,7 @@ class Profile:
     target_files: dict[str, bool] = field(default_factory=dict)  # set -> delivered
     version: str = "bump-patch"  # keep | bump-patch, for plugins the recipient versions
     inline_shared: bool = False  # upload.inline-shared
+    auto: bool = False  # delivered by CI on every push to the default branch
 
 
 def _validator() -> Draft202012Validator:
@@ -105,6 +106,7 @@ def load(source_root: Path, name: str) -> Profile:
         target_files=data.get("target-files", {}),
         version=data.get("version", "bump-patch"),
         inline_shared=data.get("upload", {}).get("inline-shared", False),
+        auto=data.get("auto", False),
     )
 
 

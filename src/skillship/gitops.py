@@ -9,12 +9,21 @@ git credential helper, a pull request through `gh`, a merge request through
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 from skillship.errors import SkillshipError
+
+# Added to the environment of every command this module runs: the CI
+# credentials of `ci.credentials`, while a delivery runs.
+EXTRA_ENV: dict[str, str] = {}
+
+
+def _env() -> dict[str, str] | None:
+    return {**os.environ, **EXTRA_ENV} if EXTRA_ENV else None
 
 
 def run(
@@ -28,6 +37,7 @@ def run(
             text=True,
             encoding="utf-8",
             input=input,
+            env=_env(),
             check=False,
         )
     except OSError as exc:
@@ -41,7 +51,9 @@ def run(
 def run_bytes(cwd: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
     """A command whose output is bytes, line endings untouched."""
     try:
-        return subprocess.run(list(args), cwd=cwd, capture_output=True, check=False)
+        return subprocess.run(
+            list(args), cwd=cwd, capture_output=True, env=_env(), check=False
+        )
     except OSError as exc:
         raise SkillshipError(f"cannot run `{args[0]}`: {exc}") from exc
 
