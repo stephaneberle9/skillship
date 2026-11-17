@@ -130,6 +130,24 @@ class SourceRepo:
                 )
         return kept
 
+    def tracked_files(self) -> list[str]:
+        """Every deliverable file of the repo, repo-relative, sorted: git-tracked ones in a git repo."""
+        if self._tracked is not None:
+            found = [p for p in self._tracked if not self.is_symlink(p)]
+        else:
+            found = [
+                self.rel(p)
+                for p in self.root.rglob("*")
+                if p.is_file() and not p.is_symlink() and ".git" not in p.parts
+            ]
+        drop = [glob_to_regex(g) for g in GLOBAL_IGNORES]
+        return sorted(f for f in found if not any(r.fullmatch(f) for r in drop))
+
+    def is_tracked_file(self, relpath: str) -> bool:
+        if self.is_symlink(relpath) or not (self.root / relpath).is_file():
+            return False
+        return self._tracked is None or relpath in self._tracked
+
     def is_symlink(self, relpath: str) -> bool:
         if self._tracked is not None and self._tracked.get(relpath) == SYMLINK_MODE:
             return True

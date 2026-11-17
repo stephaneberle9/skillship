@@ -26,7 +26,7 @@ from typing import Any
 import yaml
 
 from skillship.errors import NotImplementedYet, SkillshipError
-from skillship.layout import Layout
+from skillship.layout import Layout, check_dest
 from skillship.profile import BUILD_TARGETS_IMPLEMENTED, Profile
 from skillship.resolve import (
     LICENSE_FILES,
@@ -62,10 +62,13 @@ class BuildResult:
 
 
 @dataclass
-class _File:
+class DeliveredFile:
     data: bytes
     mode: int
-    ownership: str  # owned | merged
+    ownership: str  # owned | merged | seeded
+    source: str | None = (
+        None  # the source repo file it is made from; None when generated
+    )
 
 
 def build(
@@ -80,7 +83,7 @@ def build(
         if kind not in BUILD_TARGETS_IMPLEMENTED + DELIVER_ONLY:
             raise NotImplementedYet(f"target type `{kind}` is not implemented yet")
 
-    contents = _delivered(repo, profile, lock)
+    contents = delivered(repo, profile, lock)
     sha, dirty = repo.head()
     source = f"{repo.name()}@{sha}" if sha else repo.name()
 
@@ -107,7 +110,7 @@ def build(
     }
     if dirty:
         record["dirty"] = True
-    contents[RECORD] = _File(
+    contents[RECORD] = DeliveredFile(
         (json.dumps(record, indent=2, sort_keys=True) + "\n").encode(), 0o644, ""
     )
 
@@ -125,25 +128,32 @@ def build(
     return BuildResult(staging, archives, source, dirty)
 
 
-def _delivered(
+def delivered(
     repo: SourceRepo, profile: Profile, lock: dict[str, Any]
-) -> dict[str, _File]:
+) -> dict[str, DeliveredFile]:
     """Delivered path -> content, for every file of the delivery but `.skillship.json`."""
     layout = Layout.from_lock(lock)
     shipped = [entry["id"] for entry in lock.get("skills", [])]
     rw = rewriter(repo, layout, shipped)
-    out: dict[str, _File] = {}
+    out: dict[str, DeliveredFile] = {}
     listed: dict[str | None, list[tuple[str, str]]] = {}  # plugin -> (skill, SKILL.md)
 
-    def put(dest: str, data: bytes, mode: int, ownership: str = "owned") -> None:
+    def put(
+        dest: str,
+        data: bytes,
+        mode: int,
+        ownership: str = "owned",
+        source: str | None = None,
+    ) -> None:
+        check_dest(dest)
         if dest in out or dest == RECORD:
             raise SkillshipError(f"two files of the lock land on `{dest}`")
-        out[dest] = _File(data, mode, ownership)
+        out[dest] = DeliveredFile(data, mode, ownership, source)
 
     def content(src: str, skill: str | None) -> bytes:
         out = rewrite_file(rw, repo, src, skill)
         if out is None:  # binary, or text in another encoding: not rewritten
-            return _normalized((repo.root / src).read_bytes())
+            return normalized((repo.root / src).read_bytes())
         return out.text.encode("utf-8")
 
     for entry in lock.get("skills", []):
@@ -163,7 +173,7 @@ def _delivered(
                 raise SkillshipError(f"the lock ships `{src}`, which does not exist")
             dest = layout.skill_file(home, skill.name, rel)
             sid = entry["id"] if rel == "SKILL.md" else None
-            put(dest, content(src, sid), repo.mode(src))
+            put(dest, content(src, sid), repo.mode(src), source=src)
         if not skill.is_shared:
             listed.setdefault(layout.plugin_name(home), []).append(
                 (skill.name, layout.skill_file(home, skill.name, "SKILL.md"))
@@ -178,10 +188,10 @@ def _delivered(
         elif (
             dest not in out
         ):  # two plugins' identical copies; `lock` refuses differing ones
-            put(dest, content(extra, None), repo.mode(extra))
+            put(dest, content(extra, None), repo.mode(extra), source=extra)
     for dest, paths in mcp.items():
         merged = merge_mcp([(repo.root / p).read_bytes() for p in paths], paths)
-        put(dest, _json_bytes(merged), 0o644)
+        put(dest, json_bytes(merged), 0o644)
 
     plugins = {p["name"]: p for p in lock.get("plugins", [])}
     expected = layout.generated(list(plugins), readme=True)
@@ -193,11 +203,11 @@ def _delivered(
         kind, plugin = expected[dest]
         if kind == "marketplace":
             market = _marketplace(repo, layout, lock, plugins)
-            put(dest, _json_bytes(market), 0o644, "merged")
+            put(dest, json_bytes(market), 0o644, "merged")
         elif kind == "manifest":
             assert plugin
             manifest = _manifest(repo, profile, layout, plugins[plugin])
-            put(dest, _json_bytes(manifest), 0o644)
+            put(dest, json_bytes(manifest), 0o644)
         else:
             entry = plugins.get(plugin) if plugin else None
             readme = _readme(
@@ -214,7 +224,13 @@ def _check_extra(repo: SourceRepo, extra: str) -> None:
         or rel in (".mcp.json", "CONNECTORS.md")
         or (rel.startswith("connectors/") and ".." not in PurePosixPath(rel).parts)
     )
-    if not ok or repo.is_symlink(extra) or not (repo.root / extra).is_file():
+    path = repo.root / extra
+    if (
+        not ok
+        or repo.is_symlink(extra)
+        or not path.is_file()
+        or not path.resolve().is_relative_to(repo.root.resolve())
+    ):
         raise SkillshipError(
             f"the lock ships `{extra}`, which is no license file or MCP extra of the source repo"
         )
@@ -283,7 +299,7 @@ def _readme(
     plugin: str | None,
     entry: dict[str, Any] | None,
     skills: list[tuple[str, str]],
-    out: dict[str, _File],
+    out: dict[str, DeliveredFile],
 ) -> str:
     """A README listing the delivered skills, linked to their SKILL.md."""
     base = layout.plugin_dir(plugin) if plugin else layout.root
@@ -341,14 +357,14 @@ def _frontmatter(data: bytes) -> dict[str, Any]:
     return meta if isinstance(meta, dict) else {}
 
 
-def _normalized(data: bytes) -> bytes:
+def normalized(data: bytes) -> bytes:
     """Text with LF line endings; binary (anything with a NUL byte) unchanged."""
     if b"\0" in data[:8192]:
         return data
     return data.replace(b"\r\n", b"\n")
 
 
-def _json_bytes(data: Any) -> bytes:
+def json_bytes(data: Any) -> bytes:
     return (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
 
 

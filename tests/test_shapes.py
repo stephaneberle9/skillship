@@ -459,3 +459,21 @@ def test_differing_connectors_docs_are_refused_when_merged(source):
     git(source, "add", "-A")
     res = resolved(source, INCLUDE + "plugin-extras: {mcp: true}\n")
     assert any("on the same path `CONNECTORS.md`" in e for e in res.errors)
+
+
+@pytest.mark.parametrize("name", ["..", "a/b", "a\\b", "."])
+def test_a_lock_naming_a_plugin_outside_plugins_is_refused(name):
+    from skillship.layout import Layout
+
+    with pytest.raises(SkillshipError, match="not a directory name"):
+        Layout.from_lock({"layout": {"shape": "plugin", "name": name}})
+    with pytest.raises(SkillshipError, match="not a directory name"):
+        Layout.from_lock({"layout": {"shape": "plugins"}}).plugin_dir(name)
+
+
+@pytest.mark.parametrize("path", ["/etc/x", "a/../../x", ".git/hooks/pre-commit", ""])
+def test_a_delivered_path_outside_the_tree_is_refused(path):
+    from skillship.layout import check_dest
+
+    with pytest.raises(SkillshipError, match="leaves the delivery tree"):
+        check_dest(path)

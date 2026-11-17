@@ -57,6 +57,10 @@ def render(profile: Profile, res: Resolution) -> str:
         data["plugins"] = plugins
     if res.generated:
         data["generated"] = list(res.generated)
+    if res.target_files:
+        data["target-files"] = {
+            tfs.name: _target_file_set(tfs) for tfs in res.target_files
+        }
     if res.rewritten:
         data["rewritten"] = dict(sorted(res.rewritten.items()))
     if res.unflattened:
@@ -76,6 +80,22 @@ def render(profile: Profile, res: Resolution) -> str:
     return HEADER + yaml.safe_dump(
         data, sort_keys=False, allow_unicode=True, width=1000
     )
+
+
+def _target_file_set(tfs: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if tfs.gate:
+        out["gate"] = tfs.gate
+    files = []
+    for f in tfs.files:
+        entry = {"path": f.path, "from": f.source, "ownership": f.ownership}
+        if f.forge:
+            entry["forge"] = f.forge
+        if f.mode:
+            entry["mode"] = f.mode
+        files.append(entry)
+    out["files"] = files
+    return out
 
 
 def write(source_root: Path, profile: Profile, text: str) -> bool:

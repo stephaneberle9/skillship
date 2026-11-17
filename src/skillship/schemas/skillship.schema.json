@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/stephaneberle9/skillship/schemas/skillship.schema.json",
+  "title": "skillship settings of a source repo (distros/skillship.yaml)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "target-files": {
+      "description": "Named sets of non-skill files a `git` target in a plugin shape receives, such as the recipient's CI checks. A profile opts out of a set with `target-files: {<set>: false}`.",
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+      "additionalProperties": { "$ref": "#/$defs/set" }
+    }
+  },
+  "$defs": {
+    "relpath": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
+    },
+    "set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files"],
+      "properties": {
+        "gate": {
+          "description": "Command `deliver` runs after committing and before pushing, in the source repo, never in the target clone; a non-zero exit stops the delivery. `{target}` is replaced by the path of the target clone, `{base}` by `origin/<branch>`.",
+          "type": "string",
+          "minLength": 1
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/file" }
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "ownership"],
+      "properties": {
+        "from": {
+          "description": "A path in the source repo; a directory ends with `/` and delivers its git-tracked files.",
+          "$ref": "#/$defs/relpath"
+        },
+        "to": {
+          "description": "The path in the target repo; ends with `/` when `from` does.",
+          "$ref": "#/$defs/relpath"
+        },
+        "ownership": {
+          "description": "`owned`: replaced on every delivery and drift-checked. `seeded`: created once, then the recipient's.",
+          "enum": ["owned", "seeded"]
+        },
+        "when": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "forge": { "enum": ["github", "gitlab"] } }
+        },
+        "mode": { "enum": ["644", "755"] },
+        "rename": {
+          "description": "File names inside a directory `from` that are delivered under another name.",
+          "type": "object",
+          "additionalProperties": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" }
+        }
+      }
+    }
+  }
+}

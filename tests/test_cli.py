@@ -27,16 +27,13 @@ def test_version_flag_prints_the_package_version(capsys):
     assert capsys.readouterr().out.strip() == f"skillship {__version__}"
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["deliver", "acme", "--target", "git", "--dry-run"],
-        ["drift", "acme"],
-    ],
-)
-def test_unimplemented_commands_say_so(argv, capsys):
-    assert main(argv) == NOT_IMPLEMENTED
-    assert f"skillship {argv[0]}: not implemented yet" in capsys.readouterr().err
+def test_deliver_refuses_an_unimplemented_target(source, capsys):
+    write_profile(source, "acme", PROFILE + "  - type: skill-upload\n")
+    run(source, "lock", "acme")
+    assert run(source, "deliver", "acme") == NOT_IMPLEMENTED
+    assert (
+        "target type `skill-upload` is not implemented yet" in capsys.readouterr().err
+    )
 
 
 def test_lock_needs_a_distro_name_or_all():

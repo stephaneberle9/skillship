@@ -22,6 +22,7 @@ LOCK = "distro.lock.yaml"
 # accepted, so a profile written for a later version stays valid, and refused
 # with exit status 2 when it is used.
 BUILD_TARGETS_IMPLEMENTED = ("archive",)
+DELIVER_TARGETS_IMPLEMENTED = ("archive", "git")
 
 
 @dataclass
@@ -42,6 +43,8 @@ class Profile:
     license: str = "inherit"
     targets: list[dict[str, Any]] = field(default_factory=list)
     extras: dict[str, bool] = field(default_factory=dict)
+    target_files: dict[str, bool] = field(default_factory=dict)  # set -> delivered
+    version: str = "bump-patch"  # keep | bump-patch, for plugins the recipient versions
 
 
 def _validator() -> Draft202012Validator:
@@ -98,6 +101,8 @@ def load(source_root: Path, name: str) -> Profile:
         license=data.get("license", "inherit"),
         targets=data.get("targets", []),
         extras=data.get("plugin-extras", {}),
+        target_files=data.get("target-files", {}),
+        version=data.get("version", "bump-patch"),
     )
 
 

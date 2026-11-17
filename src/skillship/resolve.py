@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
+from skillship import config
 from skillship import profile as profile_mod
 from skillship.errors import SkillshipError
 from skillship.layout import Layout
@@ -101,6 +102,7 @@ class Resolution:
     )  # ref -> shipped skills suggesting it
     dangling: list[Dangling] = field(default_factory=list)
     dead_links: list[DeadLink] = field(default_factory=list)
+    target_files: list[config.TargetFileSet] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -176,6 +178,7 @@ def resolve(repo: SourceRepo, profile: Profile) -> Resolution:
     res.generated = list(
         layout.generated([p.name for p in res.plugins], profile_mod.readme(profile))
     )
+    res.target_files = config.target_file_sets(repo, profile)
 
     for sid in res.skills:
         for ref in repo.skills[sid].suggests:
@@ -276,13 +279,13 @@ def merge_mcp(contents: list[bytes], paths: list[str]) -> dict[str, Any]:
             raise SkillshipError(f"{path} is not valid JSON: {exc}") from exc
         if not isinstance(doc, dict) or not isinstance(doc.get("mcpServers", {}), dict):
             raise SkillshipError(f"{path} has no `mcpServers` object")
-        for name, config in doc.get("mcpServers", {}).items():
-            if name in servers and servers[name] != config:
+        for name, server in doc.get("mcpServers", {}).items():
+            if name in servers and servers[name] != server:
                 raise SkillshipError(
                     f"`{owner[name]}` and `{path}` configure MCP server `{name}` "
                     "differently -- use shape `plugins`, or `plugin-extras.mcp: false`"
                 )
-            servers[name], owner[name] = config, path
+            servers[name], owner[name] = server, path
     return {"mcpServers": dict(sorted(servers.items()))}
 
 

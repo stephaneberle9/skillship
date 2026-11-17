@@ -24,6 +24,21 @@ MANIFEST = ".claude-plugin/plugin.json"
 README = "README.md"
 
 
+def check_name(name: str) -> str:
+    """`name` when it is one path component, as a plugin directory name must be."""
+    if not name or name in (".", "..") or "/" in name or "\\" in name:
+        raise SkillshipError(f"the plugin name `{name}` is not a directory name")
+    return name
+
+
+def check_dest(path: str) -> str:
+    """`path` when it stays inside the delivery tree and outside `.git`."""
+    p = PurePosixPath(path)
+    if not p.parts or p.is_absolute() or ".." in p.parts or p.parts[0] == ".git":
+        raise SkillshipError(f"`{path}` leaves the delivery tree")
+    return path
+
+
 @dataclass(frozen=True)
 class Layout:
     shape: str
@@ -44,6 +59,8 @@ class Layout:
         name = layout.get("name")
         if shape == "plugin" and not name:
             raise SkillshipError("the lock's layout has shape `plugin` but no `name`")
+        if name:
+            check_name(name)
         return cls(shape, root, name)
 
     @property
@@ -65,7 +82,7 @@ class Layout:
                 "shape `plugins` needs every shipped skill in a plugin, but the source "
                 "repo's root skills have no `.claude-plugin/plugin.json` naming one"
             )
-        return self.root / "plugins" / name
+        return self.root / "plugins" / check_name(name)
 
     def skill_file(self, home: str | None, skill: str, rel: str) -> str:
         return (self.plugin_dir(home) / "skills" / skill / rel).as_posix()
@@ -84,7 +101,7 @@ class Layout:
         if self.is_plugin_shape:
             out[self.root_file(MARKETPLACE)] = ("marketplace", None)
             for p in plugins:
-                base = self.root / "plugins" / p
+                base = self.root / "plugins" / check_name(p)
                 out[(base / MANIFEST).as_posix()] = ("manifest", p)
                 out[(base / README).as_posix()] = ("readme", p)
         elif readme:

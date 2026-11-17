@@ -89,6 +89,10 @@ uv run pytest --cov-report=term-missing --no-cov-on-fail
 Coverage is collected from `src/skillship` and an HTML report is written to
 `htmlcov/`.
 
+The `deliver` and `drift` tests deliver into local bare repositories and sign
+their commits with a throwaway SSH key, so they need `git` 2.34 or later and
+`ssh-keygen` on the `PATH`. They never touch your own git configuration.
+
 > [!NOTE]
 > Tests, documentation and examples use synthetic skills and made-up recipient
 > names only. Never copy skills, profiles or recipient names from a real source

@@ -9,10 +9,10 @@ marketplaces, and the skills it delivers run in Claude Code, Claude Cowork and
 any other Agent Skills–compatible agent.
 
 > [!NOTE]
-> skillship is in early development. `lock` and `build` work for all three
-> layouts and the `archive` target. Upload targets, license ids other than
-> `inherit` and `none`, `deliver` and `drift` are not implemented yet: a
-> profile or command that needs them is refused with exit status 2.
+> skillship is in early development. `lock`, `build`, `deliver` and `drift`
+> work for all three layouts and the `archive` and `git` targets. Upload
+> targets and license ids other than `inherit` and `none` are not implemented
+> yet: a profile that needs them is refused with exit status 2.
 
 - [What Is This For](#what-is-this-for)
 - [Installation](#installation)
@@ -20,6 +20,8 @@ any other Agent Skills–compatible agent.
   - [Declare what each skill requires](#declare-what-each-skill-requires)
   - [Describe a distro](#describe-a-distro)
   - [Lock, build and deliver](#lock-build-and-deliver)
+  - [Deliver into a git repository](#deliver-into-a-git-repository)
+  - [Take recipient changes back](#take-recipient-changes-back)
 - [Command Reference](#command-reference)
 - [Contributing](#contributing)
 - [License](#license)
@@ -175,6 +177,116 @@ the `include:` or `plugin-extras` entry that ships the target, or a rewording
 of the link in the source. Links in `templates/` and `examples/` are not
 checked.
 
+### Deliver into a git repository
+
+A `git` target delivers into a repository the recipient owns, as one signed
+commit (`git commit -S`, so your git configuration picks SSH or GPG):
+
+```yaml
+targets:
+  - type: git
+    url: https://github.com/acme/agent-skills.git
+    branch: main          # must exist; default: the repository's default branch
+    mode: pull-request    # push (default) | pull-request (GitHub) | merge-request (GitLab)
+    forge: github         # only when the URL's host does not say it
+```
+
+`deliver` clones the target branch, applies the delivery, commits, runs the
+gates (below) and only then pushes, or pushes the branch `skillship/<distro>`
+and opens a pull request with `gh` or a merge request with `glab`. It
+authenticates through your git credential helper and the `gh` or `glab` login.
+`--dry-run` does all of it in a scratch clone and pushes nothing. `deliver`
+refuses a source repo with uncommitted changes, because the delivery records
+the source commit it was made from.
+
+`.skillship.json`, at the root of the target repo, records the delivery: the
+distro, the source commit, the lock digest, and for every file its
+**ownership class** and a SHA-256. The class decides what the next delivery
+does with the file:
+
+| Class | Files | On the next delivery |
+| --- | --- | --- |
+| `owned` | Delivered skills, generated `plugin.json` and README, owned target files | Replaced, and removed when they stop shipping |
+| `seeded` | Seeded target files, a `.gitlab-ci.yml` skillship created | Created when missing, never overwritten; a newer source version is announced to the recipient |
+| `merged` | `.claude-plugin/marketplace.json` | Only the delivered plugins' entries change; the recipient's other plugins stay listed |
+
+A `seeded` file is the recipient's once created, so `deliver` never looks at
+it again, edited or not. When its template in the source repo changes, the next
+delivery announces it: the delivery commit's message, and the description of
+the pull or merge request, carry a patch from the version originally seeded to
+the new one. The recipient applies it with `git apply -3`, a three-way merge
+against that seeded version, which their history always holds: it keeps their
+edits, including changes taken from an earlier patch, and leaves conflict
+markers only where they and the template changed the same or adjacent lines.
+In `push` mode, a template change alone makes a delivery commit, so the
+announcement always reaches the target repo. The record keeps the commit a file
+was seeded from (`seeded-from`) and the version announced last
+(`source-sha256`), so each change is announced once.
+
+Every other file of the target repo is never written. When the recipient
+versions a delivered plugin (`version` in its `plugin.json`), `deliver` keeps
+that version and raises its patch number whenever the plugin's files change;
+`version: keep` in the profile keeps it unchanged.
+
+**Target files.** A source repo can give every `git` target in a plugin shape
+files of its own, such as the CI checks a plugin repository runs. They are
+listed in `distros/skillship.yaml`, shared by all distros, in named sets:
+
+```yaml
+target-files:
+  plugin-checks:
+    gate: python templates/plugin-checks/run-plugin-checks.py --root {target} --shared-only --base {base}
+    files:
+      - from: templates/plugin-checks/      # a directory: its git-tracked files
+        to: scripts/plugin-checks/
+        ownership: owned
+        rename: {readme.md: README.md}
+      - from: templates/github/plugin-checks.yml
+        to: .github/workflows/plugin-checks.yml
+        when: {forge: github}
+        ownership: seeded
+      - from: templates/githooks/pre-commit
+        to: .githooks/pre-commit
+        mode: "755"
+        ownership: seeded
+```
+
+The lock lists each target file with its ownership class. `gate` runs after
+the commit and before the push, split like a POSIX shell command line, with
+`{target}` replaced by the path of the target clone and `{base}` by
+`origin/<branch>`; a failure stops the delivery. It runs in the source repo,
+never in the clone, and should read the clone only as data: code the recipient
+wrote, such as checks of their own, would otherwise run on the sender's machine
+with the sender's credentials and signing key. Those checks run in the
+recipient's own CI. On GitLab, a delivered `.gitlab/ci/*.yml` job file needs an
+`include:` in `.gitlab-ci.yml`: skillship creates that file when the target has
+none, and otherwise prints the lines to add. A profile opts out of a set with
+`target-files: {plugin-checks: false}`.
+
+### Take recipient changes back
+
+An `owned` file the recipient changed or deleted since the last delivery is
+**drift**, and `deliver` stops on it. `skillship drift acme` writes, for each
+changed file, a patch against the source repo into `dist/acme/drift/`, ready
+for `git apply`. The patch carries the recipient's change from the delivered
+copy back onto the source file as it was delivered, so a rewrite of the
+delivered copy, such as a flattened plugin name, never shows up as a change,
+and from there onto the source as it is today. Each file gets a verdict:
+
+| Verdict | Meaning |
+| --- | --- |
+| `clean` | The patch applies to the source as it is |
+| `conflicting` | The patch holds conflict markers to resolve |
+| `already upstream` | The source already holds the change |
+| `deleted` | The recipient deleted the file |
+| `generated` | skillship writes the file itself, so there is no source to patch |
+| `no base` | The delivered version cannot be rebuilt from the recorded source commit |
+
+Once the source holds the recipient's change, the next delivery writes what
+the recipient already has, and `deliver` no longer stops on that file; the
+same goes for a deleted file that no longer ships. To discard a recipient's
+change instead, deliver with `--overwrite PATH`.
+
 ## Command Reference
 
 | Command | Description |
@@ -184,8 +296,9 @@ checked.
 | `skillship lock … --check` | Fails when a lock is stale instead of rewriting it; meant for CI |
 | `skillship lock … --explain` | Prints every rewrite of the delivered copy as before/after lines |
 | `skillship build <name> [--out DIR]` | Builds the staging tree and archives from the lock into `DIR` (default `dist/`) |
-| `skillship deliver <name> [--target T] [--dry-run]` | Runs the distro's targets, or one of them; `--dry-run` writes nothing |
-| `skillship drift <name>` | Reports recipient-side changes to delivered files and writes merge-back patches |
+| `skillship deliver <name> [--target TYPE] [--dry-run]` | Runs the distro's targets, or those of one type; `--dry-run` pushes nothing and builds no archive |
+| `skillship deliver … --overwrite PATH` | Replaces a delivered file the recipient changed; repeatable |
+| `skillship drift <name> [--out DIR]` | Reports recipient-side changes to delivered files and writes merge-back patches to `DIR/<name>/drift/` |
 | `skillship -C DIR …` | Uses `DIR` as the source repo instead of the git work tree around the current directory |
 | `skillship --version` | Prints the installed version |
 
