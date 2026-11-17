@@ -95,7 +95,7 @@ def build(
 
     base = out / profile.name
     staging = base / "staging"
-    for path in (out, base, staging):
+    for path in (out, base, staging, *(base / k for k in upload.UPLOAD_TARGETS)):
         if path.is_symlink():
             raise SkillshipError(
                 f"{path} is a symlink; build writes only into a real directory"
@@ -160,9 +160,7 @@ def build(
             archives.append(archive)
             report = preflight.scan(package)
             path = base / kind / f"{name}.preflight.md"
-            path.write_text(
-                preflight.render(report, name), encoding="utf-8", newline="\n"
-            )
+            _atomic(path, preflight.render(report, name).encode("utf-8"))
             preflights.append((path, report))
     return BuildResult(staging, archives, source, dirty, preflights)
 
@@ -408,13 +406,27 @@ def json_bytes(data: Any) -> bytes:
 
 
 def _zip(path: Path, contents: dict[str, tuple[bytes, int]]) -> None:
+    _atomic(path, contents)
+
+
+def _atomic(path: Path, data: bytes | dict[str, tuple[bytes, int]]) -> None:
+    """Write `data`, or a zip of it, to `path` without following a symlink there.
+
+    Written to a fresh file and moved into place: `os.replace` swaps the
+    directory entry, so a symlink planted at `path` is replaced, never followed.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Written to a fresh file and moved into place: `os.replace` swaps the
-    # directory entry, so a symlink planted at `path` is replaced, never followed.
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".", suffix=".zip.part")
+    if path.parent.is_symlink():
+        raise SkillshipError(
+            f"{path.parent} is a symlink; build writes only into a real directory"
+        )
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".", suffix=".part")
     try:
         with os.fdopen(fd, "wb") as fh:
-            _write_zip(fh, contents)
+            if isinstance(data, bytes):
+                fh.write(data)
+            else:
+                _write_zip(fh, data)
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
