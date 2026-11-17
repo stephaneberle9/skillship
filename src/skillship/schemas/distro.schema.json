@@ -88,7 +88,10 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "inline-shared": { "type": "boolean" }
+        "inline-shared": {
+          "description": "For `skill-upload`: copy a plugin's `shared-material/` into each skill whose paths lead there, and point those paths at the copy.",
+          "type": "boolean"
+        }
       }
     },
     "target-files": {
@@ -133,12 +136,31 @@
         {
           "if": {
             "properties": {
-              "type": { "enum": ["skill-upload", "plugin-upload", "agensi"] }
+              "type": { "enum": ["skill-upload", "plugin-upload"] }
             }
           },
           "then": {
             "additionalProperties": false,
             "properties": { "type": true }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "agensi" } } },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "type": true,
+              "name": {
+                "description": "File name of the package, without `.zip`. Defaults to the distro name.",
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*$"
+              },
+              "title": {
+                "description": "The pack's name, as the heading of its README. Defaults to the distro name.",
+                "type": "string",
+                "minLength": 1
+              }
+            }
           }
         },
         {

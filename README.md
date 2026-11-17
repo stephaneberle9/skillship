@@ -177,6 +177,52 @@ the `include:` or `plugin-extras` entry that ships the target, or a rewording
 of the link in the source. Links in `templates/` and `examples/` are not
 checked.
 
+### Upload targets
+
+Three targets produce files to upload, into `dist/<name>/<type>/`:
+
+| Type | Writes | Upload it at |
+| --- | --- | --- |
+| `skill-upload` | One `<skill>.skill` per shipped skill, a zip holding the skill's folder | Claude Desktop or claude.ai: *Customize › Skills › Upload skill* |
+| `plugin-upload` | One `<plugin>.zip` per delivered plugin, with `.claude-plugin/plugin.json` at the top; needs a plugin shape | Claude Desktop's plugin upload |
+| `agensi` | One Agensi skill pack, `<name>.zip`, and its pre-flight report; needs shape `skills` | [Agensi](https://www.agensi.io), a marketplace for paid skills, through its MCP connector |
+
+An uploaded skill's frontmatter may hold only `name`, `description`,
+`license`, `compatibility`, `metadata` and `allowed-tools`, so `skill-upload`
+drops every other key, such as `user-invocable`, from its copy; the lock lists
+each drop. A plugin zip keeps the frontmatter Claude Code reads. For either
+target, a description longer than 1024 characters, or `metadata` that does not
+map keys to strings, blocks the lock.
+
+An upload is installed on its own, so a path that leaves it no longer
+resolves: `../other-skill/…` or `skills/other-skill/…` in a single skill, or a
+path into another plugin in a plugin zip. The lock lists each such path that
+resolves in the source under `uploads.unresolved`. `plugin-upload` keeps a
+plugin's skills together, so it suits a distro whose skills read each other.
+With `upload.inline-shared: true`, a skill whose paths lead into its plugin's
+`shared-material/` gets its own copy of that directory, and those paths are
+rewritten to point at the copy.
+
+An `agensi` package is a skill pack: a `README.md` whose heading names the
+pack (`title:` on the target, by default the distro name), a `skills/<name>/`
+folder per skill, and the shipped `shared-material/` as `shared/`, with the
+paths into it rewritten to `../../shared/…`. A distro of one skill becomes a
+single skill instead. A pack skill sees its own folder and `shared/` only, so
+paths to other skills are listed under `uploads.unresolved` as for
+`skill-upload`. Frontmatter keeps the upload keys plus the listing fields
+Agensi reads (`summary`, `version`, `tags`, `keywords`, `use_cases`,
+`docs_url`). The lock enforces Agensi's limits for an upload from an agent:
+at most 100 files, 5 MB and 50 skills, text only, no executables and no bundled
+dependencies.
+
+`build` also writes `<name>.preflight.md`, a heuristic of Agensi's security
+scan: its eight checks (file structure, file types, dangerous commands,
+secrets, environment harvesting, network access, obfuscation, prompt
+injection), each pass, warn or fail, and the score Agensi computes, 100 minus
+20 per failed check and 5 per warning. It notes scripts that read files next
+to them, which Agensi runs alone, and scripts over 20 KB. Submitting the
+package is up to you or your agent: Agensi's sign-in works interactively only.
+
 ### Deliver into a git repository
 
 A `git` target delivers into a repository the recipient owns, as one signed
@@ -302,7 +348,7 @@ change instead, deliver with `--overwrite PATH`.
 | `skillship lock --all` | Does the same for every distro of the source repo |
 | `skillship lock … --check` | Fails when a lock is stale instead of rewriting it; meant for CI |
 | `skillship lock … --explain` | Prints every rewrite of the delivered copy as before/after lines |
-| `skillship build <name> [--out DIR]` | Builds the staging tree and archives from the lock into `DIR` (default `dist/`) |
+| `skillship build <name> [--out DIR]` | Builds the staging tree, archives and upload files from the lock into `DIR` (default `dist/`) |
 | `skillship deliver <name> [--target TYPE] [--dry-run]` | Runs the distro's targets, or those of one type; `--dry-run` pushes nothing and builds no archive |
 | `skillship deliver … --overwrite PATH` | Replaces a delivered file the recipient changed; repeatable |
 | `skillship drift <name> [--out DIR]` | Reports recipient-side changes to delivered files and writes merge-back patches to `DIR/<name>/drift/` |

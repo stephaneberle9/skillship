@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
-from skillship import config
+from skillship import config, upload
 from skillship import profile as profile_mod
 from skillship.errors import SkillshipError
 from skillship.layout import Layout
@@ -103,6 +103,7 @@ class Resolution:
     dangling: list[Dangling] = field(default_factory=list)
     dead_links: list[DeadLink] = field(default_factory=list)
     target_files: list[config.TargetFileSet] = field(default_factory=list)
+    uploads: upload.Uploads = field(default_factory=upload.Uploads)
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -185,7 +186,13 @@ def resolve(repo: SourceRepo, profile: Profile) -> Resolution:
             if ref not in res.skills:
                 res.suggested.setdefault(ref, []).append(sid)
 
-    _rewrite(repo, profile, layout, res)
+    texts = _rewrite(repo, profile, layout, res)
+    kinds = upload.kinds(profile.targets)
+    if kinds:
+        res.uploads = upload.analyze(
+            repo, layout, kinds, res.files, res.extras, texts, profile.inline_shared
+        )
+        res.errors += res.uploads.errors
     res.dead_links = _dead_links(repo, layout, res)
     res.dangling = _dangling(repo, profile, res)
     acknowledged = {d.ref for d in res.dangling if d.status == "acknowledged"}
@@ -373,19 +380,24 @@ def rewrite_file(
 
 def _rewrite(
     repo: SourceRepo, profile: Profile, layout: Layout, res: Resolution
-) -> None:
+) -> dict[str, str]:
+    """Count the rewrites; returns the delivered SKILL.md text of each skill."""
     rw = rewriter(repo, layout, list(res.skills))
+    texts: dict[str, str] = {}
     acknowledged = {p for p in profile.acknowledge if p in repo.plugin_names()}
     for path, label, skill in delivered_texts(repo, res.files, res.extras):
         out = rewrite_file(rw, repo, path, skill)
         if out is None:
             continue
+        if skill:
+            texts[skill] = out.text
         if out.count:
             res.rewritten[path] = out.count
             res.rewrites[path] = out.rewrites
         for plugin, line in out.unflattened:
             status = "acknowledged" if plugin in acknowledged else "blocking"
             res.unflattened.append(Unflattened(plugin, f"{label}:{line}", status))
+    return texts
 
 
 def delivered_texts(

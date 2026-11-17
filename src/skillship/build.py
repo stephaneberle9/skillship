@@ -1,5 +1,9 @@
 """Build a distro from its lock: the staging tree, `.skillship.json` and the archives.
 
+An `archive` target zips the whole tree; the upload targets (see `upload`)
+write one `.skill` per skill or one zip per plugin, from the same delivered
+files, under `<out>/<distro>/<target type>/`.
+
 The zip is deterministic: entries sorted, one fixed timestamp, Unix permissions
 from git, and text files with LF line endings. Two builds of the same lock from
 the same source commit produce the same bytes.
@@ -19,12 +23,13 @@ import os
 import shutil
 import tempfile
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
 
+from skillship import preflight, upload
 from skillship.errors import NotImplementedYet, SkillshipError
 from skillship.layout import Layout, check_dest
 from skillship.profile import BUILD_TARGETS_IMPLEMENTED, Profile
@@ -59,6 +64,7 @@ class BuildResult:
     archives: list[Path]
     source: str
     dirty: bool
+    preflights: list[tuple[Path, preflight.Report]] = field(default_factory=list)
 
 
 @dataclass
@@ -119,13 +125,46 @@ def build(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(f.data)
 
+    files = {d: (f.data, f.mode) for d, f in contents.items()}
     archives = []
+    preflights = []
     for target in profile.targets:
-        if target["type"] == "archive":
+        kind = target["type"]
+        if kind == "archive":
             archive = base / f"{target.get('name', profile.name)}.zip"
-            _zip(archive, {d: (f.data, f.mode) for d, f in contents.items()})
+            _zip(archive, files)
             archives.append(archive)
-    return BuildResult(staging, archives, source, dirty)
+        elif kind == upload.SKILL_UPLOAD:
+            layout = Layout.from_lock(lock)
+            for name, skill in sorted(
+                upload.skill_archives(repo, layout, lock, files).items()
+            ):
+                archive = base / kind / f"{name}.skill"
+                _zip(archive, skill)
+                archives.append(archive)
+        elif kind == upload.PLUGIN_UPLOAD:
+            layout = Layout.from_lock(lock)
+            for name, plugin in sorted(
+                upload.plugin_archives(layout, lock, files).items()
+            ):
+                archive = base / kind / f"{name}.zip"
+                _zip(archive, plugin)
+                archives.append(archive)
+        elif kind == upload.AGENSI:
+            layout = Layout.from_lock(lock)
+            name = target.get("name", profile.name)
+            title = target.get("title", profile.name)
+            package = upload.agensi_archive(repo, layout, lock, files, title)
+            archive = base / kind / f"{name}.zip"
+            _zip(archive, package)
+            archives.append(archive)
+            report = preflight.scan(package)
+            path = base / kind / f"{name}.preflight.md"
+            path.write_text(
+                preflight.render(report, name), encoding="utf-8", newline="\n"
+            )
+            preflights.append((path, report))
+    return BuildResult(staging, archives, source, dirty, preflights)
 
 
 def delivered(

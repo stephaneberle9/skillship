@@ -8,13 +8,14 @@ when something is asked of this version that it cannot do yet.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from skillship import __version__, config, lockfile, profile
-from skillship.build import build
+from skillship.build import BuildResult, build
 from skillship.deliver import deliver_git
 from skillship.drift import clear, drift_report
 from skillship.errors import NotImplementedYet, SkillshipError
@@ -78,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     deliver.add_argument(
         "--target",
         metavar="TYPE",
-        help="run the targets of this type only (archive, git)",
+        help="run the targets of this type only (archive, skill-upload, plugin-upload, agensi, git)",
     )
     deliver.add_argument(
         "--dry-run",
@@ -198,6 +199,7 @@ def _report(repo: SourceRepo, prof: profile.Profile, res: Resolution) -> None:
         )
         print(f"      include: [{ref}]{_adds(repo, res, ref)}")
         print(f"      acknowledge: [{ref}]")
+    _report_uploads(res)
     if res.rewritten:
         print(
             f"  rewritten: {sum(res.rewritten.values())} rewrites in "
@@ -216,6 +218,39 @@ def _report(repo: SourceRepo, prof: profile.Profile, res: Resolution) -> None:
             "is flattened), or accept it as it is:"
         )
         print(f"      acknowledge: [{plugin}]")
+
+
+def _report_uploads(res: Resolution) -> None:
+    up = res.uploads
+    for kind, by_skill in up.dropped.items():
+        keys = sorted({k for ks in by_skill.values() for k in ks})
+        print(
+            f"  {kind} drops the frontmatter keys {', '.join(keys)} from "
+            f"{len(by_skill)} skills"
+        )
+    if up.inlined:
+        print(
+            f"  skill-upload copies shared-material into {', '.join(sorted(up.inlined))}"
+        )
+    for kind in ("skill-upload", "plugin-upload", "agensi"):
+        found = [u for u in up.unresolved if u.target == kind]
+        if not found:
+            continue
+        what = {
+            "skill-upload": "its skill",
+            "plugin-upload": "its plugin",
+            "agensi": "its skill and `shared/`",
+        }[kind]
+        print(
+            f"  {kind}: {len(found)} paths leave {what} and do not resolve once uploaded:"
+        )
+        for u in found:
+            print(f"      {u.at}: {u.path}")
+    if any(u.target == "skill-upload" for u in up.unresolved):
+        print(
+            "    plugin-upload keeps the tree together; `upload.inline-shared: true` "
+            "covers paths into shared-material"
+        )
 
 
 def _explain(prof: profile.Profile, res: Resolution) -> None:
@@ -269,7 +304,20 @@ def _build(repo: SourceRepo, args: argparse.Namespace) -> int:
     print(f"{args.name}: staged {result.staging}")
     for archive in result.archives:
         print(f"{args.name}: wrote {archive}")
+    _print_preflights(args.name, result)
     return 0
+
+
+def _print_preflights(name: str, result: BuildResult) -> None:
+    for path, report in result.preflights:
+        summary = ", ".join(
+            f"{c.name.lower()} {c.status}" for c in report.checks if c.status != "pass"
+        )
+        print(
+            f"{name}: Agensi pre-flight score {report.score}"
+            + (f" ({summary})" if summary else ", every check passes")
+            + f"; details in {path}"
+        )
 
 
 def _deliver(repo: SourceRepo, args: argparse.Namespace) -> int:
@@ -281,13 +329,16 @@ def _deliver(repo: SourceRepo, args: argparse.Namespace) -> int:
     for t in targets:
         if t["type"] not in profile.DELIVER_TARGETS_IMPLEMENTED:
             raise NotImplementedYet(f"target type `{t['type']}` is not implemented yet")
-    if any(t["type"] == "archive" for t in targets):
+    built = [t for t in targets if t["type"] != "git"]
+    if built:
         if args.dry_run:
             print(f"{args.name}: would build the archives into {args.out}/")
         else:
-            result = build(repo, prof, data, digest, _out_dir(repo, args.out))
+            only = dataclasses.replace(prof, targets=built)
+            result = build(repo, only, data, digest, _out_dir(repo, args.out))
             for archive in result.archives:
                 print(f"{args.name}: wrote {archive}")
+            _print_preflights(args.name, result)
     for t in targets:
         if t["type"] == "git":
             outcome = deliver_git(

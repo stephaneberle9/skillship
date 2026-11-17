@@ -61,6 +61,23 @@ def render(profile: Profile, res: Resolution) -> str:
         data["target-files"] = {
             tfs.name: _target_file_set(tfs) for tfs in res.target_files
         }
+    if res.uploads:
+        uploads: dict[str, Any] = {}
+        if res.uploads.dropped:
+            uploads["dropped-keys"] = {
+                kind: dict(sorted(by_skill.items()))
+                for kind, by_skill in res.uploads.dropped.items()
+            }
+        if res.uploads.inlined:
+            uploads["inlined"] = sorted(res.uploads.inlined)
+        if res.uploads.unresolved:
+            uploads["unresolved"] = [
+                {"target": u.target, "at": u.at, "path": u.path}
+                for u in sorted(
+                    res.uploads.unresolved, key=lambda u: (u.target, u.at, u.path)
+                )
+            ]
+        data["uploads"] = uploads
     if res.rewritten:
         data["rewritten"] = dict(sorted(res.rewritten.items()))
     if res.unflattened:

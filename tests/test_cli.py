@@ -5,7 +5,7 @@ import pytest
 from conftest import git, write_profile
 
 from skillship import __version__
-from skillship.cli import NOT_IMPLEMENTED, build_parser, main
+from skillship.cli import build_parser, main
 
 PROFILE = (
     "recipient: ACME\ninclude: [billing:invoice-export]\ntargets:\n  - type: archive\n"
@@ -25,15 +25,6 @@ def test_version_flag_prints_the_package_version(capsys):
         main(["--version"])
     assert exit_info.value.code == 0
     assert capsys.readouterr().out.strip() == f"skillship {__version__}"
-
-
-def test_deliver_refuses_an_unimplemented_target(source, capsys):
-    write_profile(source, "acme", PROFILE + "  - type: skill-upload\n")
-    run(source, "lock", "acme")
-    assert run(source, "deliver", "acme") == NOT_IMPLEMENTED
-    assert (
-        "target type `skill-upload` is not implemented yet" in capsys.readouterr().err
-    )
 
 
 def test_lock_needs_a_distro_name_or_all():
@@ -285,15 +276,6 @@ def test_build_refuses_a_stale_lock(source, capsys):
     write_profile(source, "acme", PROFILE + "license: none\n")
     assert run(source, "build", "acme") == 1
     assert "the lock of `acme` is stale" in capsys.readouterr().err
-
-
-def test_build_refuses_an_unimplemented_target(source, capsys):
-    write_profile(source, "acme", PROFILE + "  - type: skill-upload\n")
-    run(source, "lock", "acme")
-    assert run(source, "build", "acme") == 2
-    assert (
-        "target type `skill-upload` is not implemented yet" in capsys.readouterr().err
-    )
 
 
 def test_build_skips_git_targets(source):
