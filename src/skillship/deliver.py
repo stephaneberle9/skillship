@@ -41,7 +41,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from skillship import config, gitops
+from skillship import config, gitops, lockfile
+from skillship import profile as profile_mod
 from skillship.build import RECORD, DeliveredFile, delivered, json_bytes, normalized
 from skillship.errors import SkillshipError
 from skillship.layout import MANIFEST, MARKETPLACE, Layout
@@ -119,9 +120,59 @@ def delivery(
     return Delivery(files, layout, plugins, gates)
 
 
+def base_delivery(
+    repo: SourceRepo,
+    profile: Profile,
+    record: dict[str, Any],
+    forge: str | None,
+    where: Path,
+) -> tuple[SourceRepo, Delivery] | None:
+    """The source repo at the commit a record names, and the delivery it made; None when unknown.
+
+    `where` receives a worktree of that commit; `remove_worktree` takes it away.
+    The record is the recipient's to edit, so its commit counts only when it is
+    a full object id of this source repo, and an ancestor of what is delivered
+    now: never a ref, an option, or an unrelated commit picked for what its
+    delivery held.
+    """
+    if record.get("dirty"):
+        return None
+    name, _, sha = str(record.get("source", "")).rpartition("@")
+    if (
+        name != repo.name()
+        or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha)
+        or not gitops.has_commit(repo.root, sha)
+        or gitops.run(
+            repo.root, "git", "merge-base", "--is-ancestor", sha, "HEAD", check=False
+        ).returncode
+        != 0
+    ):
+        return None
+    gitops.git(repo.root, "worktree", "add", "--quiet", "--detach", str(where), sha)
+    try:
+        base_repo = SourceRepo(where)
+        base_profile = profile_mod.load(where, profile.name)
+        lock, _ = lockfile.load(where, profile.name)
+        return base_repo, delivery(base_repo, base_profile, lock, forge)
+    except SkillshipError:
+        return None  # the commit lacks the distro, or holds a lock this version cannot read
+
+
+def remove_worktree(repo: SourceRepo, where: Path) -> None:
+    if where.exists():
+        gitops.git(repo.root, "worktree", "remove", "--force", str(where), check=False)
+        gitops.git(repo.root, "worktree", "prune", check=False)
+
+
 def _check_path(path: str) -> None:
     p = PurePosixPath(path)
-    if not p.parts or p.is_absolute() or ".." in p.parts or p.parts[0] == ".git":
+    if (
+        not p.parts
+        or p.is_absolute()
+        or ".." in p.parts
+        # Windows reads `.GIT`, `.git.` and `.git ` as `.git`
+        or any(part.lower().rstrip(". ") == ".git" for part in p.parts)
+    ):
         raise SkillshipError(f"`{path}` leaves the target repo")
 
 
@@ -141,7 +192,10 @@ def inside(clone: Path, path: str) -> Path:
                 f"`{path}` passes through a symlink in the target repo; "
                 "skillship does not follow symlinks there"
             )
-    if not current.resolve().is_relative_to(clone.resolve()):
+    resolved = current.resolve()
+    if not resolved.is_relative_to(clone.resolve()) or resolved.is_relative_to(
+        (clone / ".git").resolve()  # also an alias, such as an 8.3 short name
+    ):
         raise SkillshipError(f"`{path}` leaves the target repo")
     return current
 
@@ -261,7 +315,14 @@ def deliver_git(
                 + f"\nRun `skillship drift {profile.name}` to merge the changes back into "
                 "the source, or discard them with `--overwrite PATH`."
             )
-        record = _apply(repo, sha, clone, profile, new, old, forge, out)
+        # Which files to remove, and which marketplace entries to drop, comes from
+        # the last delivery as rebuilt from the source, never from the record alone:
+        # anyone with write access to the target can edit `.skillship.json`, and a
+        # forged entry must not make a signed delivery delete the recipient's files.
+        base = base_delivery(repo, profile, old, forge, tmp / "base") if old else None
+        record = _apply(
+            repo, sha, clone, profile, new, old, forge, out, base[1] if base else None
+        )
         record.update(
             {"distro": profile.name, "source": source, "lock-digest": lock_digest}
         )
@@ -304,6 +365,7 @@ def deliver_git(
         out.lines += stat.splitlines()
         return out
     finally:
+        remove_worktree(repo, tmp / "base")
         rmtree(tmp)
 
 
@@ -316,8 +378,13 @@ def _apply(
     old: dict[str, Any],
     forge: str | None,
     out: Outcome,
+    previous: Delivery | None,
 ) -> dict[str, Any]:
-    """Write the delivery into the clone; returns the new record (without its header)."""
+    """Write the delivery into the clone; returns the new record (without its header).
+
+    `previous` is the last delivery as rebuilt from the source; only its files
+    are removed when they no longer ship.
+    """
     old_files: dict[str, dict[str, Any]] = old.get("files", {})
     files = dict(new.files)
     _bump_versions(clone, profile, new, files, old_files, out)
@@ -365,7 +432,8 @@ def _apply(
                     "seeded-from": sha,
                 }
         else:  # merged
-            data = _merge_marketplace(target, f.data, old.get("plugins", []))
+            listed = previous.plugins if previous else []
+            data = _merge_marketplace(target, f.data, listed)
             _write(target, DeliveredFile(data, f.mode, "merged"))
             record["files"][path] = {"ownership": "merged", "sha256": sha256(data)}
 
@@ -373,7 +441,12 @@ def _apply(
         if path in files:
             continue
         if meta.get("ownership") == "owned":
-            _check_path(path)
+            if previous is None or path not in previous.files:
+                out.say(
+                    f"  `{path}` no longer ships, but the source does not confirm an "
+                    "earlier delivery wrote it; left in place"
+                )
+                continue
             inside(clone, path).unlink(missing_ok=True)
             _prune_dirs(clone, inside(clone, path).parent)
         elif meta.get("ownership") == "seeded" and path == GITLAB_CI:

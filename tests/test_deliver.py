@@ -17,6 +17,8 @@ from conftest import git, write_profile
 
 from skillship.cli import main
 from skillship.config import forge_of
+from skillship.deliver import content_hash, inside
+from skillship.errors import SkillshipError
 
 GATE = """\
 import pathlib, subprocess, sys
@@ -593,3 +595,55 @@ def test_a_symlink_in_the_target_is_never_followed(
     assert run(distro, "deliver", "acme") == 1
     assert "passes through a symlink" in capsys.readouterr().err
     assert not any(outside.iterdir())
+
+
+def test_a_forged_record_entry_never_deletes_a_recipient_file(
+    distro: Path, target: Path, tmp_path: Path, capsys
+):
+    assert run(distro, "deliver", "acme") == 0
+    work = checkout(target, tmp_path / "edit")
+    forged = record(work)
+    readme = (work / "README.md").read_bytes()
+    forged["files"]["README.md"] = {
+        "ownership": "owned",
+        "sha256": content_hash("README.md", readme),
+    }
+    recipient_commit(
+        target, tmp_path, {".skillship.json": json.dumps(forged, indent=2) + "\n"}
+    )
+    assert run(distro, "deliver", "acme") == 0
+    assert "`README.md` no longer ships, but the source does not confirm" in (
+        capsys.readouterr().out
+    )
+    work = checkout(target, tmp_path / "check")
+    assert (work / "README.md").read_bytes() == readme
+    assert "README.md" not in record(work)["files"]
+
+
+@pytest.mark.parametrize("path", [".GIT/config", ".git./config", "a/.git /x", ".git"])
+def test_a_path_into_git_is_refused_in_any_spelling(tmp_path: Path, path: str):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git/config").write_text("")
+    with pytest.raises(SkillshipError, match="leaves the target repo"):
+        inside(tmp_path, path)
+
+
+@pytest.mark.parametrize(
+    "forged", ["HEAD", "HEAD~1", "--orphan", "other@{sha}", "source@{short}"]
+)
+def test_a_record_naming_no_exact_ancestor_rebuilds_nothing(
+    distro: Path, target: Path, tmp_path: Path, forged: str
+):
+    from skillship import profile as profile_mod
+    from skillship.deliver import base_delivery
+    from skillship.source import SourceRepo
+
+    sha = git(distro, "rev-parse", "HEAD").strip()
+    repo = SourceRepo(distro)
+    source = forged.format(sha=sha, short=sha[:12]).replace("source", repo.name())
+    record_ = {"source": source if "@" in source else f"{repo.name()}@{source}"}
+    prof = profile_mod.load(distro, "acme")
+    assert base_delivery(repo, prof, record_, "github", tmp_path / "base") is None
+    assert base_delivery(
+        repo, prof, {"source": f"{repo.name()}@{sha}"}, "github", tmp_path / "ok"
+    )

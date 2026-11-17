@@ -210,6 +210,13 @@ does with the file:
 | `seeded` | Seeded target files, a `.gitlab-ci.yml` skillship created | Created when missing, never overwritten; a newer source version is announced to the recipient |
 | `merged` | `.claude-plugin/marketplace.json` | Only the delivered plugins' entries change; the recipient's other plugins stay listed |
 
+What the last delivery wrote is taken from the source repo, not from the
+record: `deliver` rebuilds that delivery from the source commit the record
+names, and removes only its files that no longer ship, and drops only its
+plugins' marketplace entries. Anyone who can push to the target can edit the
+record, and an entry added there never makes a delivery delete a file. When
+the commit cannot be rebuilt, nothing is removed, and `deliver` says so.
+
 A `seeded` file is the recipient's once created, so `deliver` never looks at
 it again, edited or not. When its template in the source repo changes, the next
 delivery announces it: the delivery commit's message, and the description of

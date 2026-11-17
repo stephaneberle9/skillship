@@ -28,16 +28,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from skillship import config, gitops, lockfile
-from skillship import profile as profile_mod
+from skillship import config, gitops
 from skillship.build import normalized
 from skillship.deliver import (
     Drifted,
+    base_delivery,
     content_hash,
-    delivery,
     drift,
     inside,
     read_record,
+    remove_worktree,
     rmtree,
 )
 from skillship.errors import SkillshipError
@@ -66,47 +66,15 @@ def drift_report(
         drifted = drift(clone, record)
         if not drifted:
             return []
-        base = _base_delivery(repo, profile, record, forge, tmp / "base")
+        built = base_delivery(repo, profile, record, forge, tmp / "base")
+        base = (built[0], built[1].files) if built else None
         findings = []
         for d in drifted:
             findings.append(_finding(repo, clone, record, base, d, out_dir))
         return findings
     finally:
-        if (tmp / "base").exists():
-            gitops.git(
-                repo.root,
-                "worktree",
-                "remove",
-                "--force",
-                str(tmp / "base"),
-                check=False,
-            )
-            gitops.git(repo.root, "worktree", "prune", check=False)
+        remove_worktree(repo, tmp / "base")
         rmtree(tmp)
-
-
-def _base_delivery(
-    repo: SourceRepo,
-    profile: Profile,
-    record: dict[str, Any],
-    forge: str | None,
-    where: Path,
-) -> tuple[SourceRepo, dict[str, Any]] | None:
-    """The source repo at the delivered commit and the delivery it made; None when unknown."""
-    if record.get("dirty"):
-        return None
-    sha = str(record.get("source", "")).rpartition("@")[2]
-    if not sha or not gitops.has_commit(repo.root, sha):
-        return None
-    gitops.git(repo.root, "worktree", "add", "--quiet", "--detach", str(where), sha)
-    try:
-        base_repo = SourceRepo(where)
-        base_profile = profile_mod.load(where, profile.name)
-        lock, _ = lockfile.load(where, profile.name)
-        files = delivery(base_repo, base_profile, lock, forge).files
-    except SkillshipError:
-        return None  # the commit lacks the distro, or holds a lock this version cannot read
-    return base_repo, files
 
 
 def _finding(
