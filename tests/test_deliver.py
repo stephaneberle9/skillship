@@ -810,7 +810,9 @@ def test_ci_opens_a_merge_request_through_the_api(
 
     def fake(url, method, data=None):
         calls.append((method, url, data))
-        return [] if method == "GET" else {"web_url": "https://mr/1"}
+        if method == "GET":  # a fork's merge request from a branch of the same name
+            return [{"iid": 9, "project_id": 1, "source_project_id": 2}]
+        return {"web_url": "https://mr/1"}
 
     monkeypatch.setattr(gitops, "_gitlab", fake)
     monkeypatch.setitem(gitops.EXTRA_ENV, "GITLAB_TOKEN", "t")

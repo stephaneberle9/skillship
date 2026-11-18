@@ -128,14 +128,17 @@ def open_pull_request(
     """Open a pull or merge request from `head` into `base`; returns its URL.
 
     An open one is reused, its description replaced by `body`, which describes the
-    branch as the delivery just rewrote it.
+    branch as the delivery just rewrote it; only one whose source branch is in the
+    target repo itself, never one from a fork that happens to use the same name.
     """
     if forge == "github":
         listed = run(
             clone_dir, "gh", "pr", "list", "--head", head, "--base", base,
-            "--state", "open", "--json", "url",
+            "--state", "open", "--json", "url,isCrossRepository",
         ).stdout  # fmt: skip
-        found = json.loads(listed or "[]")
+        found = [
+            p for p in json.loads(listed or "[]") if not p.get("isCrossRepository")
+        ]
         if found:
             url = found[0]["url"]
             run(clone_dir, "gh", "pr", "edit", url, "--body-file", "-", input=body)
@@ -151,7 +154,7 @@ def open_pull_request(
         clone_dir, "glab", "mr", "list", "--source-branch", head,
         "--target-branch", base, "--output", "json",
     ).stdout  # fmt: skip
-    found = json.loads(listed or "[]")
+    found = _same_project(json.loads(listed or "[]"))
     if found:
         run(
             clone_dir, "glab", "mr", "update", str(found[0]["iid"]),
@@ -167,6 +170,11 @@ def open_pull_request(
     return urls[-1] if urls else out.strip()
 
 
+def _same_project(found: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The merge requests whose source branch is in the target project, not in a fork."""
+    return [m for m in found if m.get("source_project_id") == m.get("project_id")]
+
+
 def _merge_request_api(
     clone_dir: Path, base: str, head: str, title: str, body: str
 ) -> str:
@@ -179,7 +187,7 @@ def _merge_request_api(
     query = urllib.parse.urlencode(
         {"state": "opened", "source_branch": head, "target_branch": base}
     )
-    found = _gitlab(f"{api}?{query}", "GET")
+    found = _same_project(_gitlab(f"{api}?{query}", "GET"))
     if found:
         iid = found[0]["iid"]
         _gitlab(f"{api}/{iid}", "PUT", {"description": body})
