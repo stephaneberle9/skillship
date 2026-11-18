@@ -134,11 +134,41 @@ def _ssh(tmp: Path, key: str, passphrase: str) -> list[str]:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="ascii", newline="\n") as fh:
         fh.write(key)
+    _owner_only(path)
     if (
         passphrase
     ):  # strip it: `git` signs through `ssh-keygen -Y sign`, which would prompt
         _tool(["ssh-keygen", "-q", "-p", "-P", passphrase, "-N", "", "-f", str(path)])
     return ["-c", "gpg.format=ssh", "-c", f"user.signingkey={path.as_posix()}"]
+
+
+def _owner_only(path: Path) -> None:
+    """Restrict `path` to its owner where the mode bits do not.
+
+    On Windows, `os.open`'s mode only toggles read-only: the file takes the
+    directory's ACL, which can grant OWNER RIGHTS (S-1-3-4) explicitly, and
+    Windows OpenSSH refuses a private key that any SID besides its owner,
+    SYSTEM and Administrators can reach ("Bad permissions"). Removing
+    inheritance alone leaves an explicit entry in place, so remove it by SID.
+    """
+    if os.name != "nt":
+        return
+    user = os.environ.get("USERNAME", "")
+    domain = os.environ.get("USERDOMAIN", "")
+    if not user:
+        raise SkillshipError(f"cannot restrict {KEY}'s file: USERNAME is not set")
+    account = f"{domain}\\{user}" if domain else user
+    _tool(
+        [
+            "icacls",
+            str(path),
+            "/inheritance:r",
+            "/grant:r",
+            f"{account}:F",
+            "/remove:g",
+            "*S-1-3-4",
+        ]
+    )
 
 
 def _gpg(tmp: Path, key: str, passphrase: str) -> tuple[list[str], dict[str, str]]:
