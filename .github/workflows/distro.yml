@@ -63,8 +63,8 @@ jobs:
       distros: ${{ steps.list.outputs.distros }}
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
       - id: version
         env:
           GIVEN: ${{ inputs.skillship-version }}
@@ -113,10 +113,10 @@ jobs:
       group: distro-${{ matrix.distro.name }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0 # deliver rebuilds the last delivery from its source commit
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
       - name: Deliver
         env:
           VERSION: ${{ needs.plan.outputs.version }}
@@ -141,7 +141,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: distro-${{ matrix.distro.name }}
           path: |
@@ -163,10 +163,10 @@ jobs:
       group: distro-${{ matrix.distro.name }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v8.1.0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
       - name: Deliver
         env:
           VERSION: ${{ needs.plan.outputs.version }}
@@ -179,7 +179,7 @@ jobs:
           DISTRO_COMMITTER_NAME: ${{ vars[format('DISTRO_{0}_COMMITTER_NAME', matrix.distro.key)] || vars.DISTRO_COMMITTER_NAME }}
           DISTRO_COMMITTER_EMAIL: ${{ vars[format('DISTRO_{0}_COMMITTER_EMAIL', matrix.distro.key)] || vars.DISTRO_COMMITTER_EMAIL }}
         run: *deliver
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: distro-${{ matrix.distro.name }}
           path: |

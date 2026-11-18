@@ -3,7 +3,9 @@
 Credentials are never skillship's: a clone or push authenticates through the
 git credential helper, a pull request through `gh`, a merge request through
 `glab`, each as already logged in. A commit is signed with plain
-`git commit -S`, so the user's git configuration picks SSH or GPG.
+`git commit -S`, so the user's git configuration picks SSH or GPG. In CI,
+`ci.credentials` supplies the token instead, and a merge request goes through
+GitLab's REST API, since CI runners rarely have `glab`.
 """
 
 from __future__ import annotations
@@ -13,7 +15,11 @@ import os
 import shutil
 import subprocess
 import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
+from typing import Any
 
 from skillship.errors import SkillshipError
 
@@ -139,6 +145,8 @@ def open_pull_request(
             "--title", title, "--body-file", "-", input=body,
         ).stdout  # fmt: skip
         return out.strip().splitlines()[-1] if out.strip() else ""
+    if EXTRA_ENV.get("GITLAB_TOKEN"):
+        return _merge_request_api(clone_dir, base, head, title, body)
     listed = run(
         clone_dir, "glab", "mr", "list", "--source-branch", head,
         "--target-branch", base, "--output", "json",
@@ -157,3 +165,58 @@ def open_pull_request(
     ).stdout  # fmt: skip
     urls = [w for w in out.split() if w.startswith("http")]
     return urls[-1] if urls else out.strip()
+
+
+def _merge_request_api(
+    clone_dir: Path, base: str, head: str, title: str, body: str
+) -> str:
+    """Open or update a merge request through GitLab's REST API, with the CI token."""
+    url = run(clone_dir, "git", "remote", "get-url", "origin").stdout.strip()
+    parts = urllib.parse.urlsplit(url)
+    path = parts.path.strip("/").removesuffix(".git")
+    api = f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}/api/v4/projects/"
+    api += urllib.parse.quote(path, safe="") + "/merge_requests"
+    query = urllib.parse.urlencode(
+        {"state": "opened", "source_branch": head, "target_branch": base}
+    )
+    found = _gitlab(f"{api}?{query}", "GET")
+    if found:
+        iid = found[0]["iid"]
+        _gitlab(f"{api}/{iid}", "PUT", {"description": body})
+        return found[0].get("web_url", "")
+    created = _gitlab(
+        api,
+        "POST",
+        {
+            "source_branch": head,
+            "target_branch": base,
+            "title": title,
+            "description": body,
+            "remove_source_branch": True,
+        },
+    )
+    return created.get("web_url", "")
+
+
+def _gitlab(url: str, method: str, data: dict[str, Any] | None = None) -> Any:
+    request = urllib.request.Request(
+        url,
+        method=method,
+        data=json.dumps(data).encode() if data is not None else None,
+        headers={
+            "PRIVATE-TOKEN": EXTRA_ENV["GITLAB_TOKEN"],
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read() or b"null")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")[:500]
+        raise SkillshipError(
+            f"GitLab answered {exc.code} to {method} {url.split('?')[0]}: {detail}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise SkillshipError(
+            f"cannot reach GitLab at {url.split('?')[0]}: {exc.reason}"
+        ) from exc

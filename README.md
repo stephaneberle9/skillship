@@ -389,14 +389,21 @@ upper-cased and `_` for `-` (`acme-billing` → `ACME_BILLING`):
 Each falls back to the same name without `<KEY>_`, for settings all distros
 share. The forge shows the commit as verified when the key's public half is
 registered as a signing key with an account that holds the committer's
-email; a `users.noreply` address of that account works. With the input
+email; a `users.noreply` address of that account works. Use a key made for
+deliveries, never the one that signs your own commits: a CI secret is exposed to
+every workflow run of the source repo, and revoking a leaked delivery key then
+leaves your own signing intact. One delivery key per source repo, shared by its
+targets, is a reasonable default; it is registered once per forge account, not
+per target repo. With the input
 `environments: true`, each job runs in the GitHub environment
 `distro-<name>`, whose secrets serve as the unprefixed names and whose
 required reviewers gate the delivery. Environments need a public repository,
 or a paid plan for a private one.
 
-The gate runs without these variables, and the token is never written to a
-file or a command line.
+The token is never written to a file or a command line, and a merge request
+goes through GitLab's REST API, so CI needs no `glab`. The gate runs without
+these variables in its environment; it is the source repo's own code, though,
+trusted like the workflow that runs it.
 
 ## Command Reference
 

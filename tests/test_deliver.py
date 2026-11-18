@@ -790,3 +790,44 @@ def test_ci_token_goes_to_git_as_a_header_for_the_target_host(
         ci.credentials("git@github.com:acme/plugins.git", "github"),
     ):
         pass
+
+
+def test_ci_opens_a_merge_request_through_the_api(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from skillship import gitops
+
+    git(tmp_path, "init", "-q", str(tmp_path / "c"))
+    clone = tmp_path / "c"
+    git(
+        clone,
+        "remote",
+        "add",
+        "origin",
+        "https://gitlab.example.com/acme/sub/plugins.git",
+    )
+    calls = []
+
+    def fake(url, method, data=None):
+        calls.append((method, url, data))
+        return [] if method == "GET" else {"web_url": "https://mr/1"}
+
+    monkeypatch.setattr(gitops, "_gitlab", fake)
+    monkeypatch.setitem(gitops.EXTRA_ENV, "GITLAB_TOKEN", "t")
+    url = gitops.open_pull_request(clone, "gitlab", "main", "skillship/acme", "T", "B")
+    assert url == "https://mr/1"
+    api = (
+        "https://gitlab.example.com/api/v4/projects/acme%2Fsub%2Fplugins/merge_requests"
+    )
+    assert calls[0][0] == "GET" and calls[0][1].startswith(api + "?")
+    assert calls[1] == (
+        "POST",
+        api,
+        {
+            "source_branch": "skillship/acme",
+            "target_branch": "main",
+            "title": "T",
+            "description": "B",
+            "remove_source_branch": True,
+        },
+    )
