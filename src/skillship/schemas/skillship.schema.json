@@ -40,7 +40,14 @@
       "required": ["from", "to", "ownership"],
       "properties": {
         "from": {
-          "description": "A path in the source repo; a directory ends with `/` and delivers its git-tracked files.",
+          "description": "A path in the source repo; a directory ends with `/` and delivers its git-tracked files. A list of files is joined in order into one `seeded` file.",
+          "oneOf": [
+            { "$ref": "#/$defs/relpath" },
+            { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/relpath" } }
+          ]
+        },
+        "announce": {
+          "description": "`seeded` only: a file of the source repo whose text a delivery shows the recipient when the target already holds a file of its own at `to`, once per version of that text.",
           "$ref": "#/$defs/relpath"
         },
         "to": {

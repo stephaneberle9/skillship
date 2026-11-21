@@ -105,7 +105,10 @@ def _target_file_set(tfs: Any) -> dict[str, Any]:
         out["gate"] = tfs.gate
     files = []
     for f in tfs.files:
-        entry = {"path": f.path, "from": f.source, "ownership": f.ownership}
+        source = f.sources[0] if len(f.sources) == 1 else list(f.sources)
+        entry = {"path": f.path, "from": source, "ownership": f.ownership}
+        if f.announce:
+            entry["announce"] = f.announce
         if f.forge:
             entry["forge"] = f.forge
         if f.mode:

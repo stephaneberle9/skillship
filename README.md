@@ -9,10 +9,9 @@ marketplaces, and the skills it delivers run in Claude Code, Claude Cowork and
 any other Agent Skills–compatible agent.
 
 > [!NOTE]
-> skillship is in early development. `lock`, `build`, `deliver` and `drift`
-> work for all three layouts and the `archive` and `git` targets. Upload
-> targets and license ids other than `inherit` and `none` are not implemented
-> yet: a profile that needs them is refused with exit status 2.
+> skillship is in early development. License ids other than `inherit` and
+> `none` are not implemented yet: a profile that needs one is refused with exit
+> status 2.
 
 - [What Is This For](#what-is-this-for)
 - [Installation](#installation)
@@ -20,8 +19,11 @@ any other Agent Skills–compatible agent.
   - [Declare what each skill requires](#declare-what-each-skill-requires)
   - [Describe a distro](#describe-a-distro)
   - [Lock, build and deliver](#lock-build-and-deliver)
+  - [Upload targets](#upload-targets)
   - [Deliver into a git repository](#deliver-into-a-git-repository)
   - [Take recipient changes back](#take-recipient-changes-back)
+  - [Deliver from CI](#deliver-from-ci)
+- [Claude Code Plugin](#claude-code-plugin)
 - [Command Reference](#command-reference)
 - [Contributing](#contributing)
 - [License](#license)
@@ -254,6 +256,7 @@ does with the file:
 | --- | --- | --- |
 | `owned` | Delivered skills, generated `plugin.json` and README, owned target files | Replaced, and removed when they stop shipping |
 | `seeded` | Seeded target files, a `.gitlab-ci.yml` skillship created | Created when missing, never overwritten; a newer source version is announced to the recipient |
+| `announced` | A seeded target file the recipient already had | Never written; the `announce` text is shown when it changes |
 | `merged` | `.claude-plugin/marketplace.json` | Only the delivered plugins' entries change; the recipient's other plugins stay listed |
 
 What the last delivery wrote is taken from the source repo, not from the
@@ -294,15 +297,26 @@ target-files:
         to: scripts/plugin-checks/
         ownership: owned
         rename: {readme.md: README.md}
-      - from: templates/github/plugin-checks.yml
-        to: .github/workflows/plugin-checks.yml
+      - from: templates/github/run-static-checks.yml
+        to: .github/workflows/run-static-checks.yml
         when: {forge: github}
         ownership: seeded
-      - from: templates/githooks/pre-commit
-        to: .githooks/pre-commit
-        mode: "755"
+      - from:                               # files joined in order
+          - templates/pre-commit-config.yaml
+          - templates/pre-commit-config.plugin-checks.yaml
+        to: .pre-commit-config.yaml
+        announce: templates/pre-commit-config.plugin-checks.yaml
         ownership: seeded
 ```
+
+A `seeded` file can be joined from several files of the source repo, listed in
+`from`, and can name an `announce` file. When the target repo already has a
+file of its own at that path, skillship leaves it alone and shows the
+recipient the announced text instead, in the delivery commit's message and the
+pull or merge request, under *Files you already had*: here, the hook to add to
+the recipient's own `.pre-commit-config.yaml`. The record marks such a file
+`announced` and keeps the text's hash, so the text is shown again only when it
+changes. Neither works for an `owned` file.
 
 The lock lists each target file with its ownership class. `gate` runs after
 the commit and before the push, split like a POSIX shell command line, with
@@ -342,12 +356,16 @@ change instead, deliver with `--overwrite PATH`.
 
 ### Deliver from CI
 
-The reusable workflow `.github/workflows/distro.yml` delivers from GitHub
-Actions. Call it from the source repo, pinned to a skillship release, and pin
-the CLI version in `distros/.skillship-version`:
+The reusable workflow `.github/workflows/distros.yml` delivers from GitHub
+Actions. Call it from a workflow of the source repo's own, such as
+`deliver-distros.yml`, pinned to the commit of a skillship
+release tag (it receives the source repo's secrets, and a tag can be moved), and
+pin the same CLI version in `distros/.skillship-version`. The
+[skillship plugin](#claude-code-plugin) ships the caller as a template
+(`plugins/skillship/skills/skillship/templates/deliver-distros.yml`); in short:
 
 ```yaml
-# .github/workflows/distros.yml
+# .github/workflows/deliver-distros.yml
 name: Deliver distros
 on:
   workflow_dispatch:
@@ -360,7 +378,8 @@ permissions:
   contents: read
 jobs:
   deliver:
-    uses: stephaneberle9/skillship/.github/workflows/distro.yml@v0.5.0
+    # The commit of the release tag: gh api repos/stephaneberle9/skillship/commits/v<version> --jq .sha
+    uses: stephaneberle9/skillship/.github/workflows/distros.yml@<sha> # v<version>
     with:
       distro: ${{ inputs.distro || '' }}
       dry-run: ${{ inputs.dry-run || false }}
@@ -404,6 +423,21 @@ The token is never written to a file or a command line, and a merge request
 goes through GitLab's REST API, so CI needs no `glab`. The gate runs without
 these variables in its environment; it is the source repo's own code, though,
 trusted like the workflow that runs it.
+
+## Claude Code Plugin
+
+This repository is also a Claude Code plugin marketplace. Its `skillship`
+plugin lets Claude drive the CLI: draft a distro from a sentence, walk through
+the dangling report of `lock`, explain a lock diff, choose an upload target,
+set up delivery from CI step by step, go through recipient drift, and submit an
+Agensi pack.
+
+```text
+/plugin marketplace add stephaneberle9/skillship
+/plugin install skillship@skillship
+```
+
+See [plugins/skillship/README.md](plugins/skillship/README.md).
 
 ## Command Reference
 

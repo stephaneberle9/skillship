@@ -75,6 +75,10 @@ class DeliveredFile:
     source: str | None = (
         None  # the source repo file it is made from; None when generated
     )
+    # a seeded target file: the source files joined into it (`source` names them
+    # with ` + `), and the file to announce when the target holds its own
+    parts: tuple[str, ...] = ()
+    announce: str | None = None
 
 
 def build(

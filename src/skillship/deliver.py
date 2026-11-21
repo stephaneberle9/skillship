@@ -82,9 +82,19 @@ class SeededUpdate:
 
 
 @dataclass
+class Announcement:
+    """A target file the recipient already had, with the text they are shown for it."""
+
+    path: str  # in the target repo
+    source: str  # the announced file in the source repo
+    text: bytes
+
+
+@dataclass
 class Outcome:
     lines: list[str] = field(default_factory=list)
     seeded: list[SeededUpdate] = field(default_factory=list)
+    announced: list[Announcement] = field(default_factory=list)
 
     def say(self, line: str) -> None:
         self.lines.append(line)
@@ -100,19 +110,35 @@ def delivery(
         for entry in spec.get("files", []):
             if entry.get("forge") and entry["forge"] != forge:
                 continue
-            path, src = entry["path"], entry["from"]
+            path = entry["path"]
+            parts = (
+                entry["from"] if isinstance(entry["from"], list) else [entry["from"]]
+            )
+            announce = entry.get("announce")
             _check_path(path)
             if path in files or path == RECORD:
                 raise SkillshipError(
                     f"target file `{path}` of set `{name}` lands on a delivered file"
                 )
-            if not repo.is_tracked_file(src):
+            for src in [*parts, *([announce] if announce else [])]:
+                if not repo.is_tracked_file(src):
+                    raise SkillshipError(
+                        f"the lock delivers `{src}` as `{path}`, which is no file of the source repo"
+                    )
+            if (len(parts) > 1 or announce) and entry["ownership"] != "seeded":
                 raise SkillshipError(
-                    f"the lock delivers `{src}` as `{path}`, which is no file of the source repo"
+                    f"the lock joins files into or announces `{path}`, which is not seeded"
                 )
-            mode = int(entry["mode"], 8) if entry.get("mode") else repo.mode(src)
-            data = normalized((repo.root / src).read_bytes())
-            files[path] = DeliveredFile(data, mode, entry["ownership"], src)
+            mode = int(entry["mode"], 8) if entry.get("mode") else repo.mode(parts[0])
+            data = b"".join(normalized((repo.root / p).read_bytes()) for p in parts)
+            files[path] = DeliveredFile(
+                data,
+                mode,
+                entry["ownership"],
+                " + ".join(parts),
+                tuple(parts),
+                announce,
+            )
         if spec.get("gate"):
             gates.append((name, spec["gate"]))
     layout = Layout.from_lock(lock)
@@ -368,6 +394,7 @@ def _deliver_git(
             source,
             changed,
             out.seeded,
+            out.announced,
             sign=not dry_run,
             ident=ident,
         )
@@ -443,6 +470,16 @@ def _apply(
                 record["files"][path] = entry
             elif target.exists():
                 out.say(f"  `{path}` exists in the target and is left as it is")
+                if f.announce:
+                    text = normalized((repo.root / f.announce).read_bytes())
+                    entry = {"ownership": "announced", "sha256": sha256(text)}
+                    if seeded != entry:
+                        out.announced.append(Announcement(path, f.announce, text))
+                        out.say(
+                            f"  the delivery shows the recipient `{f.announce}` "
+                            f"for their own `{path}`"
+                        )
+                    record["files"][path] = entry
             else:
                 _write(target, f)
                 record["files"][path] = {
@@ -656,13 +693,24 @@ def _seeded_patch(
     for sha in filter(None, candidates):
         if not gitops.has_commit(repo.root, sha):
             continue
-        done = gitops.run_bytes(repo.root, "git", "show", f"{sha}:{f.source}")
-        if done.returncode != 0:
-            continue
-        seeded = normalized(done.stdout)
-        if sha256(seeded) == entry.get("sha256"):
+        parts = f.parts or ((f.source,) if f.source else ())
+        seeded = _at_commit(repo, sha, parts)
+        if seeded is not None and sha256(seeded) == entry.get("sha256"):
             return gitops.patch(path, seeded, f.data)
     return None
+
+
+def _at_commit(repo: SourceRepo, sha: str, parts: tuple[str, ...]) -> bytes | None:
+    """The source files `parts` at commit `sha`, joined; None when one is missing there."""
+    if not parts:
+        return None
+    out = b""
+    for part in parts:
+        done = gitops.run_bytes(repo.root, "git", "show", f"{sha}:{part}")
+        if done.returncode != 0:
+            return None
+        out += normalized(done.stdout)
+    return out
 
 
 def seeded_notes(updates: list[SeededUpdate], source: str, *, markdown: bool) -> str:
@@ -717,12 +765,58 @@ def seeded_notes(updates: list[SeededUpdate], source: str, *, markdown: bool) ->
     return "\n".join(parts) + "\n"
 
 
+def announced_notes(items: list[Announcement], *, markdown: bool) -> str:
+    """The section of a commit message or PR/MR description that shows `items`."""
+    if not items:
+        return ""
+    parts = [
+        "## Files you already had" if markdown else "Files you already had",
+        "",
+        (
+            "skillship would have created these files, but your repository already "
+            "has its own, which skillship never changes. Add what follows to each "
+            "of them yourself, where it fits; it is shown again only when it changes."
+        ),
+    ]
+    for a in items:
+        text = a.text.decode("utf-8", errors="replace").strip("\n")
+        parts += [
+            "",
+            f"`{a.path}`, from `{a.source}`:"
+            if markdown
+            else f"{a.path}, from {a.source}:",
+            "",
+        ]
+        if markdown:
+            longest = max((len(m) for m in re.findall(r"`+", text)), default=0)
+            fence = "`" * max(3, longest + 1)
+            parts += [fence, text, fence]
+        else:
+            parts.append(text)
+    return "\n".join(parts) + "\n"
+
+
+def _notes(
+    seeded: list[SeededUpdate],
+    announced: list[Announcement],
+    source: str,
+    *,
+    markdown: bool,
+) -> str:
+    sections = [
+        seeded_notes(seeded, source, markdown=markdown),
+        announced_notes(announced, markdown=markdown),
+    ]
+    return "\n".join(s for s in sections if s)
+
+
 def _commit(
     clone: Path,
     profile: Profile,
     source: str,
     changed: str,
     seeded: list[SeededUpdate],
+    announced: list[Announcement],
     *,
     sign: bool,
     ident: list[str],
@@ -744,7 +838,7 @@ def _commit(
         f"chore: deliver {profile.name} from {name}@{sha[:12]}\n\n"
         f"Delivered by skillship from {source}: {summary}.\n"
     )
-    notes = seeded_notes(seeded, source, markdown=False)
+    notes = _notes(seeded, announced, source, markdown=False)
     if notes:
         message += "\n" + notes
     # verbatim: the default cleanup strips trailing blanks a patch line may need
@@ -804,12 +898,12 @@ def _push(
         f"Delivered by skillship from `{source}`.\n\n"
         f"The branch `{head}` is rewritten by every delivery until this is merged.\n"
     )
-    notes = seeded_notes(out.seeded, source, markdown=True)
+    notes = _notes(out.seeded, out.announced, source, markdown=True)
     if len(body) + len(notes) > _BODY_LIMIT:
-        names = ", ".join(f"`{u.path}`" for u in out.seeded)
+        names = ", ".join(f"`{x.path}`" for x in [*out.seeded, *out.announced])
         notes = (
-            f"\n## Seeded files with a newer template\n\n{names}: their patches are "
-            "too long for this description and are in the delivery commit's message.\n"
+            f"\n## Files to update yourself\n\n{names}: what to change in them is "
+            "too long for this description and is in the delivery commit's message.\n"
         )
     elif notes:
         notes = "\n" + notes

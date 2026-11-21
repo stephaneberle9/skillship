@@ -378,6 +378,97 @@ def test_a_newer_seeded_template_is_announced_once_with_its_patch(
     )
 
 
+HOOKS = """\
+      - from: [ci/hooks-base.yaml, ci/hooks-checks.yaml]
+        to: .pre-commit-config.yaml
+        announce: ci/hooks-checks.yaml
+        ownership: seeded
+"""
+
+
+def with_hooks(distro: Path) -> None:
+    """Add a seeded `.pre-commit-config.yaml` joined from two files to the settings."""
+    settings = distro / "distros/skillship.yaml"
+    settings.write_text(settings.read_text() + HOOKS, encoding="utf-8")
+    (distro / "ci/hooks-base.yaml").write_text("repos:\n  - repo: base\n")
+    (distro / "ci/hooks-checks.yaml").write_text("\n  - repo: checks\n")
+    git(distro, "add", "-A")
+    assert run(distro, "lock", "acme") == 0
+    commit(distro, "hooks")
+
+
+def test_a_seeded_file_joins_its_sources_in_order(
+    distro: Path, target: Path, tmp_path: Path
+):
+    with_hooks(distro)
+    lock = (distro / "distros/acme/distro.lock.yaml").read_text()
+    assert "from:\n      - ci/hooks-base.yaml\n      - ci/hooks-checks.yaml\n" in lock
+    assert "announce: ci/hooks-checks.yaml" in lock
+    assert run(distro, "deliver", "acme") == 0
+    work = checkout(target, tmp_path / "check")
+    hooks = ".pre-commit-config.yaml"
+    assert (work / hooks).read_text() == (
+        "repos:\n  - repo: base\n\n  - repo: checks\n"
+    )
+    assert record(work)["files"][hooks]["ownership"] == "seeded"
+    assert "Files you already had" not in git(work, "log", "-1", "--format=%B")
+
+    # a newer part is announced as a patch of the joined file, like any seeded file
+    (distro / "ci/hooks-base.yaml").write_text("repos:\n  - repo: base2\n")
+    commit(distro)
+    assert run(distro, "deliver", "acme") == 0
+    work = checkout(target, tmp_path / "check")
+    message = git(work, "log", "-1", "--format=%B")
+    assert f"{hooks}, from ci/hooks-base.yaml + ci/hooks-checks.yaml:" in message
+    assert "-  - repo: base\n+  - repo: base2\n" in message
+
+
+def test_a_file_the_recipient_has_gets_the_announcement_once(
+    distro: Path, target: Path, tmp_path: Path, capsys
+):
+    hooks = ".pre-commit-config.yaml"
+    recipient_commit(target, tmp_path, {hooks: "repos: []  # ours\n"})
+    with_hooks(distro)
+    assert run(distro, "deliver", "acme") == 0
+    work = checkout(target, tmp_path / "check")
+    assert (work / hooks).read_text() == "repos: []  # ours\n"
+    message = git(work, "log", "-1", "--format=%B")
+    assert "Files you already had" in message
+    assert f"{hooks}, from ci/hooks-checks.yaml:\n\n  - repo: checks\n" in message
+    assert record(work)["files"][hooks]["ownership"] == "announced"
+
+    capsys.readouterr()
+    assert run(distro, "deliver", "acme") == 0
+    assert "up to date" in capsys.readouterr().out
+
+    (distro / "ci/hooks-checks.yaml").write_text("\n  - repo: checks2\n")
+    commit(distro)
+    assert run(distro, "deliver", "acme") == 0
+    work = checkout(target, tmp_path / "check")
+    assert "  - repo: checks2" in git(work, "log", "-1", "--format=%B")
+    assert (work / hooks).read_text() == "repos: []  # ours\n"
+
+
+def test_only_a_seeded_file_joins_or_announces(distro: Path, capsys):
+    settings = distro / "distros/skillship.yaml"
+    settings.write_text(
+        settings.read_text() + HOOKS.replace("seeded", "owned"), encoding="utf-8"
+    )
+    (distro / "ci/hooks-base.yaml").write_text("a\n")
+    (distro / "ci/hooks-checks.yaml").write_text("b\n")
+    git(distro, "add", "-A")
+    assert run(distro, "lock", "acme") == 1
+    assert "which only a `seeded` file can" in capsys.readouterr().err
+
+
+def test_announced_notes_fence_text_holding_backticks():
+    from skillship.deliver import Announcement, announced_notes
+
+    item = Announcement(".x", "ci/x", b"a ``` b\n")
+    notes = announced_notes([item], markdown=True)
+    assert "\n````\na ``` b\n````\n" in notes
+
+
 def test_seeded_notes_fence_a_patch_holding_backticks():
     from skillship.deliver import SeededUpdate, seeded_notes
 

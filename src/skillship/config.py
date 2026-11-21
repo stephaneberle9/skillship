@@ -3,7 +3,9 @@
 Today it holds `target-files`: named sets of non-skill files that a `git` target
 in a plugin shape receives, each with the ownership it is delivered with and an
 optional `gate`, the command `deliver` runs against the target clone before
-pushing.
+pushing. A seeded file may be made of several source files, joined in order, and
+may name an `announce` file: the text a delivery shows the recipient when the
+target already holds a file of its own at that path.
 skillship knows nothing about what the files are; the source repo says so here.
 """
 
@@ -29,10 +31,11 @@ SETTINGS = "skillship.yaml"
 @dataclass
 class TargetFile:
     path: str  # in the target repo
-    source: str  # in the source repo
+    sources: tuple[str, ...]  # in the source repo, joined in order; one unless seeded
     ownership: str  # owned | seeded
     forge: str | None = None  # only for a target on this forge
     mode: str | None = None  # "755" or "644"; else the source file's git mode
+    announce: str | None = None  # seeded only: shown when the target has its own file
 
 
 @dataclass
@@ -135,6 +138,25 @@ def _expand(
         "forge": forge,
         "mode": entry.get("mode"),
     }
+    announce = entry.get("announce")
+    if (isinstance(src, list) or announce) and entry["ownership"] != "seeded":
+        raise SkillshipError(
+            f"{where}: `to: {dest}` joins several files or names `announce`, "
+            "which only a `seeded` file can"
+        )
+    if announce and not repo.is_tracked_file(announce):
+        raise SkillshipError(
+            f"{where}: `announce: {announce}` is no file of the source repo"
+        )
+    if isinstance(src, list):
+        for part in src:
+            if part.endswith("/") or not repo.is_tracked_file(part):
+                raise SkillshipError(
+                    f"{where}: `from: {part}` of `to: {dest}` is no file of the source repo"
+                )
+        if dest.endswith("/"):
+            raise SkillshipError(f"{where}: `to: {dest}` joins files, so it is a file")
+        return [TargetFile(dest, tuple(src), announce=announce, **common)]
     if not src.endswith("/"):
         if dest.endswith("/"):
             raise SkillshipError(
@@ -144,7 +166,7 @@ def _expand(
             raise SkillshipError(
                 f"{where}: `from: {src}` is no file of the source repo"
             )
-        return [TargetFile(dest, src, **common)]
+        return [TargetFile(dest, (src,), announce=announce, **common)]
     if not dest.endswith("/"):
         raise SkillshipError(
             f"{where}: `from: {src}` is a directory, so `to: {dest}` must end with `/`"
@@ -159,7 +181,9 @@ def _expand(
         name = rename.get(p.name, p.name)
         out.append(
             TargetFile(
-                (PurePosixPath(dest) / p.parent / name).as_posix(), src + rel, **common
+                (PurePosixPath(dest) / p.parent / name).as_posix(),
+                (src + rel,),
+                **common,
             )
         )
     return out
