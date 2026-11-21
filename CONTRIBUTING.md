@@ -46,9 +46,14 @@ checks to maintain high code quality standards:
 | `ruff-check` | Python linting (with auto-fix) |
 | `ruff-format` | Python code formatting |
 | `ty check` | Modern type checking for Python |
+| `plugin checks` | Manifests, skill frontmatter, cross-references and secrets of the Claude Code plugin under `plugins/` |
 
 The same hooks run in CI on every pull request and every push to `main`
-(`run-static.yml`).
+(`run-static-checks.yml`); on pull requests the plugin checks add the plugin version
+policy against the target branch.
+`scripts/plugin-checks/` is a byte-identical copy of the plugin-check templates
+that `claude-plugin-knowledge` ships; update it by copying, never by editing it
+here.
 
 ### Enable automatic execution on git commit
 

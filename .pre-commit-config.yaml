@@ -49,3 +49,21 @@ repos:
         files: ^src/|^tests/
         pass_filenames: false
         require_serial: true
+
+  # The plugin checks, before every commit and in the static-checks job of CI. From the
+  # claude-plugin-knowledge skill (skill-crafting plugin): appended under `repos:` of
+  # .pre-commit-config.yaml, below the git-hooks-setup baseline (dev-essentials plugin).
+  # In a pull or merge request pipeline the script also applies the version policy
+  # against the target branch, which it fetches itself; a local commit skips it. prek
+  # builds the hook's Python environment with PyYAML itself. It checks the working tree,
+  # not only what is staged.
+  - repo: local
+    hooks:
+      - id: plugin-checks
+        name: plugin checks
+        entry: python scripts/plugin-checks/run-plugin-checks.py
+        language: python
+        additional_dependencies: [pyyaml==6.0.2]
+        pass_filenames: false
+        always_run: true
+        require_serial: true

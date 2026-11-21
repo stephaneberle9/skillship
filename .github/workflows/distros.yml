@@ -1,10 +1,12 @@
 # Reusable workflow: deliver a source repo's distros from GitHub Actions.
 #
-# Call it from the source repo, pinned to a skillship release:
+# Call it from the source repo, pinned to the commit of a skillship release tag
+# (gh api repos/stephaneberle9/skillship/commits/v<version> --jq .sha), from a
+# workflow of its own such as .github/workflows/deliver-distros.yml:
 #
 #   jobs:
 #     deliver:
-#       uses: stephaneberle9/skillship/.github/workflows/distro.yml@v0.5.0
+#       uses: stephaneberle9/skillship/.github/workflows/distros.yml@<sha> # v<version>
 #       with:
 #         distro: ${{ inputs.distro }}
 #         dry-run: ${{ inputs.dry-run }}

@@ -57,6 +57,11 @@ exclude = ["*.log"]
 [tool.uv]
 default-groups = ["dev", "test"]
 
+[tool.ruff]
+# Byte-identical copies of the claude-plugin-knowledge plugin-check templates;
+# formatting or fixing them here would break that.
+extend-exclude = ["scripts/plugin-checks"]
+
 [tool.ruff.lint]
 extend-select = ["I", "UP"]
 

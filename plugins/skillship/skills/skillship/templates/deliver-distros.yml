@@ -1,0 +1,42 @@
+# Deliver the distros under distros/ with skillship's reusable workflow, which this
+# workflow calls; it is not a copy of it. From the skillship skill (skillship plugin),
+# references/ci-delivery.md, which walks through the credentials.
+# From the Actions tab: one distro or all, as a dry run by default. On a push to the
+# default branch: the distros whose profile says `auto: true`.
+# Credentials for git targets are secrets and variables named per distro,
+# DISTRO_<KEY>_DEPLOY_TOKEN and so on; see skillship's README, "Deliver from CI".
+# The reusable workflow is pinned by the commit SHA of a release tag, with the tag as a
+# comment for Renovate (gh api repos/stephaneberle9/skillship/commits/v<version> --jq .sha);
+# that tag and distros/.skillship-version move together.
+name: Deliver distros
+
+on:
+  workflow_dispatch:
+    inputs:
+      distro:
+        description: The distro to deliver; empty for all
+        type: string
+        default: ""
+      dry-run:
+        description: Prepare and check every delivery, push nothing
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+    # The distros' profiles and locks, and the skills they ship from.
+    paths: ["distros/**", "plugins/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  deliver:
+    uses: stephaneberle9/skillship/.github/workflows/distros.yml@<sha> # v<version>
+    with:
+      distro: ${{ inputs.distro || '' }}
+      dry-run: ${{ inputs.dry-run || false }}
+      auto-only: ${{ github.event_name == 'push' }}
+      # With a public repository or a paid plan: one environment `distro-<name>` per
+      # distro, for its own secrets and required reviewers.
+      # environments: true
+    secrets: inherit

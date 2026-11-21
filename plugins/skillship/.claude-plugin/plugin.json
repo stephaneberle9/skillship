@@ -1,0 +1,10 @@
+{
+  "name": "skillship",
+  "description": "Draft, lock and deliver distros of your Agent Skills with skillship: dangling-report walk-throughs, lock-diff explanations, CI delivery setup, recipient drift and Agensi submission.",
+  "author": {
+    "name": "Stephan Eberle"
+  },
+  "repository": "https://github.com/stephaneberle9/skillship",
+  "license": "MIT",
+  "keywords": ["skills", "agent-skills", "distribution", "packaging", "delivery"]
+}

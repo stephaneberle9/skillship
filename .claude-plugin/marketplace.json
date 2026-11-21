@@ -1,0 +1,16 @@
+{
+  "name": "skillship",
+  "owner": {
+    "name": "Stephan Eberle"
+  },
+  "metadata": {
+    "description": "The skillship plugin: Claude drives skillship to resolve, lock and deliver curated subsets of Agent Skills."
+  },
+  "plugins": [
+    {
+      "name": "skillship",
+      "description": "Draft, lock and deliver distros of your Agent Skills with skillship: dangling-report walk-throughs, lock-diff explanations, CI delivery setup, recipient drift and Agensi submission.",
+      "source": "./plugins/skillship"
+    }
+  ]
+}
