@@ -29,9 +29,9 @@ def lock_path(source_root: Path, name: str) -> Path:
 
 def render(profile: Profile, res: Resolution) -> str:
     layout: dict[str, Any] = {"shape": profile.shape, "root": profile.root}
-    if profile.shape == "plugin":
-        layout["name"] = profile.plugin_name
-    if profile.shape in ("plugins", "plugin"):
+    if profile.shape == "marketplace":
+        if profile.merged_plugin:
+            layout["merged-plugin"] = profile.merged_plugin
         layout["marketplace"] = profile.marketplace or profile.name
     data: dict[str, Any] = {
         "lock-version": VERSION,

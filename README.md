@@ -103,24 +103,70 @@ targets:
     mode: pull-request
 ```
 
+`recipient` says who receives the distro, for people reading the profile. A
+profile may leave it out when nobody in particular is named and its targets
+only build files to pass on. The recipient then reads as "Early adopters",
+followed by how the files travel:
+
+| Targets | Default recipient |
+| --- | --- |
+| `archive` | Early adopters, one-off hand-overs by email, Slack, WhatsApp and the like |
+| `skill-upload`, `plugin-upload` | Early adopters, one-off or repeated uploads into Claude Desktop and claude.ai |
+
+A profile with both kinds of target names both ways. A `git` or `agensi`
+target needs a named recipient.
+
 The layout shape decides how the delivered tree looks:
 
 | Shape | Delivered tree |
 | --- | --- |
 | `skills` | `skills/<skill>/`, every skill side by side, without plugins |
-| `plugins` | `plugins/<plugin>/` per source plugin that ships a skill, each with a generated `plugin.json` and README, and a `.claude-plugin/marketplace.json` listing them |
-| `plugin` | One plugin, `plugins/<name>/`, merging every shipped skill, with its `plugin.json`, README and `marketplace.json` |
+| `marketplace` | A marketplace: `plugins/<plugin>/` per source plugin that ships a skill, one or several, each with a generated `plugin.json` and README, and a `.claude-plugin/marketplace.json` listing them |
+
+A marketplace keeps the source's plugins. To deliver one plugin instead, name
+it under `layout.merged-plugin`: every shipped skill is merged into that plugin,
+`plugins/<name>/`, whichever source plugin it comes from.
+
+```yaml
+layout:
+  shape: marketplace
+  merged-plugin:
+    name: acme-billing
+    description: Billing skills for ACME.
+```
+
+The `archive` of a marketplace is a marketplace too: unpacked, it is added with
+`/plugin marketplace add <directory>`, and its plugins are installed from
+there. It is not a file to upload. The `plugin-upload` target packs the same
+plugin folders one zip each, for Claude Desktop's plugin upload.
 
 A generated `plugin.json` keeps the source plugin's fields except `repository`,
 `homepage` and component paths, and its `dependencies` name only plugins that
 ship, plus those of other marketplaces. `layout.root` puts the tree in a
-subdirectory, `layout.marketplace` names the marketplace (default: the distro
-name), and `layout.name` and `layout.description` describe the merged plugin.
+subdirectory, and `layout.marketplace` names the marketplace (default: the
+distro name).
 
 `plugin-extras.mcp: true` delivers each shipping plugin's `.mcp.json`,
-`CONNECTORS.md` and `connectors/`, merged where the shape merges plugins.
-`plugin-extras.readme: true` adds a README listing the skills to the `skills`
-shape; the plugin shapes always generate one per plugin.
+`CONNECTORS.md` and `connectors/`. `plugin-extras.readme: true` adds a README
+listing the skills to the `skills` shape; a marketplace always generates one
+per plugin.
+
+The `skills` shape and a marketplace with `merged-plugin` **flatten**: the
+source plugins do not survive, so the extras of several source plugins land on
+one path. There they are merged:
+
+- `.mcp.json`: the servers side by side; one server name with two different
+  configurations blocks the lock.
+- `CONNECTORS.md`: one document. Sections with the same `##` heading become
+  one section, and a section only one file has keeps its place ahead of the
+  sections that follow it there. A paragraph, list or alert that an earlier
+  file already has is dropped, and tables with the same header row become one
+  table, where rows that differ only in their last cell become one row with
+  both cells. The text of a plugin follows that of the plugins it depends on,
+  and a link from one of the merged files to another points at the merged
+  file. A `###` heading that two files use for different text appears twice;
+  reword one in the source.
+- Any other file, such as two different `connectors/setup.md`, blocks the lock.
 
 ### Lock, build and deliver
 
@@ -160,7 +206,7 @@ For a blocking mention, `lock` prints the profile edits that fix it: an
 rewrites per file; `skillship lock --explain` prints each one:
 
 - A delivered `SKILL.md` keeps only the `metadata.suggests` entries that ship.
-- In the `skills` and `plugin` shapes, plugin-qualified names are flattened,
+- In a flattening layout, plugin-qualified names are flattened,
   because the source plugins no longer exist: `/plugin:skill` becomes `/skill`
   (or `/<name>:skill` in the merged plugin). An attribution after a skill's
   name loses its plugin (or names the merged plugin): "(`` `plugin` ``
@@ -186,7 +232,7 @@ Three targets produce files to upload, into `dist/<name>/<type>/`:
 | Type | Writes | Upload it at |
 | --- | --- | --- |
 | `skill-upload` | One `<skill>.skill` per shipped skill, a zip holding the skill's folder | Claude Desktop or claude.ai: *Customize › Skills › Upload skill* |
-| `plugin-upload` | One `<plugin>.zip` per delivered plugin, with `.claude-plugin/plugin.json` at the top; needs a plugin shape | Claude Desktop's plugin upload |
+| `plugin-upload` | One `<plugin>.zip` per delivered plugin, with `.claude-plugin/plugin.json` at the top; needs shape `marketplace` | Claude Desktop's plugin upload |
 | `agensi` | One Agensi skill pack, `<name>.zip`, and its pre-flight report; needs shape `skills` | [Agensi](https://www.agensi.io), a marketplace for paid skills, through its MCP connector |
 
 An uploaded skill's frontmatter may hold only `name`, `description`,
@@ -284,7 +330,7 @@ versions a delivered plugin (`version` in its `plugin.json`), `deliver` keeps
 that version and raises its patch number whenever the plugin's files change;
 `version: keep` in the profile keeps it unchanged.
 
-**Target files.** A source repo can give every `git` target in a plugin shape
+**Target files.** A source repo can give every `git` target of a marketplace
 files of its own, such as the CI checks a plugin repository runs. They are
 listed in `distros/skillship.yaml`, shared by all distros, in named sets:
 

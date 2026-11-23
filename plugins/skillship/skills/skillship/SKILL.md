@@ -75,8 +75,14 @@ repo":
    | The recipient wants | Shape |
    | --- | --- |
    | Skills to drop into `.claude/skills`, or a flat zip | `skills` |
-   | The source's plugin split, installable as a marketplace | `plugins` |
-   | One plugin of their own, beside their other plugins | `plugin`, with `layout.name` and `layout.description` |
+   | The source's plugins, one or several, installable as a marketplace (its archive is a marketplace to add, not a file to upload) | `marketplace` |
+   | One plugin of their own, whichever source plugins the skills come from | `marketplace`, with `layout.merged-plugin: {name, description}` |
+
+   `skills` and a marketplace with `merged-plugin` flatten: the source plugins
+   do not survive, and their `.mcp.json` and `CONNECTORS.md` files are merged
+   into one each. Read the merged `CONNECTORS.md` in `dist/<name>/staging/`
+   after the first build; where it reads badly, the fix is a rewording in the
+   source files, not in the delivery.
 
 4. **Targets.** `archive` for a hand-over; uploads per *Choosing an upload
    target*; `git` with `url`, `branch` and `mode` (`push`, `pull-request` on
@@ -90,8 +96,12 @@ repo":
    server of its plugin or links its `CONNECTORS.md`; the lock's dead-link check
    says so if it is missed.
 
-Write `distros/<name>/distro.yaml` with a comment naming the recipient and the
-purpose, then lock it.
+Write `distros/<name>/distro.yaml` with a comment naming the purpose and a
+`recipient:` line, then lock it. A profile whose targets are all `archive`,
+`skill-upload` or `plugin-upload` may leave `recipient` out when nobody in
+particular is named: it then stands for early adopters who are handed the zip
+or upload the files themselves. A `git` or `agensi` target needs a named
+recipient.
 
 ## Locking and the dangling report
 
@@ -111,7 +121,7 @@ apply a batch blind:
     `conditional`, and fixes every distro at once);
   - `exclude:` only to keep a skill out that an `include` glob matches. An
     excluded skill that something requires fails the lock, which is the point.
-- **Unflattened plugin mention** (shapes `skills` and `plugin`) — prose names a
+- **Unflattened plugin mention** (shape `skills`, or `merged-plugin`) — prose names a
   source plugin in a phrasing flattening does not rewrite. Reword the source
   into an attribution phrasing the README lists, or acknowledge the plugin name
   when the mention is about the plugin as such (a pointer to its
@@ -119,6 +129,13 @@ apply a batch blind:
 - **Dead link** — a relative link that resolves in the source but not in the
   delivered tree. Ship the target (`include:` or `plugin-extras`) or reword the
   link.
+- **Two files on one path** (shape `skills`, or `merged-plugin`) — a flattening
+  layout puts the extras of several source plugins into one directory.
+  `.mcp.json` and `CONNECTORS.md` files are merged; one MCP server configured
+  two ways, or any other two differing files (`connectors/setup.md` in two
+  plugins), block the lock. Make them agree in the source, keep the plugins
+  apart (shape `marketplace` without `merged-plugin`), or leave the extras out
+  with `plugin-extras.mcp: false`.
 - **Upload limits** — a description over 1024 characters, non-string `metadata`,
   or Agensi's file, size or file-type limits. These are fixed in the source.
 
@@ -156,7 +173,7 @@ with `skill-upload`, read the lock's `uploads.unresolved` for that target:
 - **Empty**: `skill-upload` is right; each skill is self-contained.
 - **Paths listed**: those skills read each other or their plugin's shared
   material, and those paths break once installed. Recommend `plugin-upload`
-  (needs shape `plugins` or `plugin`), which keeps a plugin's skills together.
+  (needs shape `marketplace`), which keeps a plugin's skills together.
   `upload.inline-shared: true` repairs only paths into `shared-material/`, not a
   skill reading another skill.
 
@@ -168,7 +185,20 @@ similar, since their behavior on claude.ai then differs from Claude Code.
 
 - **Archive and upload targets:** `skillship build <name>` or
   `deliver <name> --target <type>`; output lands in `dist/<name>/`. Name the
-  files and where they get uploaded.
+  files and where they get uploaded, and give the user the steps to pass on
+  with a hand-over (from the Claude Code docs; confirm them on the first real
+  hand-over):
+
+  | File | The receiver |
+  | --- | --- |
+  | Archive of a marketplace | Unzips it to a folder that stays, adds that folder as a marketplace (`/plugin marketplace add <folder>`, or the Marketplaces tab of `/plugins` in VS Code) and installs the plugins. Claude Code loads a local marketplace in place, so moving or deleting the folder breaks them; it does not take the zip itself |
+  | Archive of shape `skills` | Copies the folders under `skills/` into `~/.claude/skills/`, or into a project's `.claude/skills/` |
+  | `<plugin>.zip` of `plugin-upload` | Uploads it in Claude Desktop, or unzips it into `~/.claude/skills/<plugin>/` for Claude Code |
+  | `<skill>.skill` of `skill-upload` | Uploads it in Claude Desktop or claude.ai under *Customize › Skills* |
+
+  For a one-off hand-over of skills from several plugins, a marketplace with
+  `merged-plugin` is the easiest to receive: one plugin, no dependency between
+  plugins to resolve, and the same content as archive and as upload zip.
 - **Git targets, locally:** `deliver <name> --dry-run` first: it clones,
   applies, commits and runs the gate in a scratch clone and pushes nothing.
   Report what it would change. Run the real delivery only when asked. `deliver`
@@ -219,6 +249,11 @@ interactive session; see
   of the pinned version, or raise the pin.
 - **`build` refuses the lock**: it is stale; run `lock <name>` and review the
   diff.
+- **"shape `plugins` is now `marketplace`"**, or **"the lock's layout shape …
+  is unknown"**: the profile or lock was written for skillship before 0.7.0.
+  `plugins` becomes `marketplace`; `plugin` with `layout.name` and
+  `layout.description` becomes `marketplace` with
+  `layout.merged-plugin: {name, description}`. Then lock again.
 - **"the target holds the delivery of distro …"**: one target repo receives one
   distro.
 - **"cannot clone"**: the branch is missing or the credentials do not reach the

@@ -7,7 +7,7 @@ top-level entry is the skill's folder, for Claude Desktop and claude.ai
 
 `plugin-upload` writes one zip per delivered plugin, with
 `.claude-plugin/plugin.json` at the top, for Claude Desktop's plugin upload. It
-needs a plugin shape. Its skills keep their frontmatter: plugins read the keys
+needs shape `marketplace`. Its skills keep their frontmatter: plugins read the keys
 Claude Code reads.
 
 An upload is installed on its own, so a path that leaves it no longer
@@ -272,9 +272,9 @@ def analyze(
     of each skill.
     """
     out = Uploads()
-    if PLUGIN_UPLOAD in targets and not layout.is_plugin_shape:
+    if PLUGIN_UPLOAD in targets and not layout.is_marketplace:
         out.errors.append(
-            f"`{PLUGIN_UPLOAD}` needs shape `plugins` or `plugin`, not `{layout.shape}`"
+            f"`{PLUGIN_UPLOAD}` needs shape `marketplace`, not `{layout.shape}`"
         )
     if AGENSI in targets and layout.shape != "skills":
         out.errors.append(
@@ -325,7 +325,7 @@ def analyze(
                     and not (shared_ships and _inside(ref.target, shared))
                 ):
                     out.unresolved.append(Unresolved(AGENSI, at, ref.path))
-                if PLUGIN_UPLOAD in targets and layout.is_plugin_shape:
+                if PLUGIN_UPLOAD in targets and layout.is_marketplace:
                     mine = plugin_of(sid)
                     ok = any(
                         _inside(ref.target, d) and plugin_of(s) == mine

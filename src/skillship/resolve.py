@@ -6,9 +6,12 @@ ship is a dangling mention; it blocks the lock unless the skill is suggested
 by a shipped skill, the mention is phrased conditionally ("when installed"),
 or the profile acknowledges it.
 
-The delivered text is rewritten (see `rewrite`). In the `skills` and `plugin`
-shapes that includes flattening, and a mention of a source plugin flattening
-cannot rewrite blocks the lock unless the profile acknowledges that plugin.
+The delivered text is rewritten (see `rewrite`). In a flattening layout, the
+`skills` shape and a merged marketplace, that includes flattening, and a
+mention of a source plugin flattening cannot rewrite blocks the lock unless the
+profile acknowledges that plugin. Such a layout also puts the source plugins'
+MCP extras on one path: their `.mcp.json` and `CONNECTORS.md` files are merged,
+and any other two differing files there block the lock.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
-from skillship import config, upload
+from skillship import config, connectors, upload
 from skillship import profile as profile_mod
 from skillship.errors import SkillshipError
 from skillship.layout import Layout
@@ -68,12 +71,12 @@ class Unflattened:
 
 @dataclass
 class PluginEntry:
-    """A delivered plugin of a plugin shape."""
+    """A delivered plugin of a marketplace."""
 
     name: str
     sources: list[str]  # the source plugins it is made of
     dependencies: list[Any]  # `plugin.json` entries
-    description: str | None = None  # shape `plugin` only; else the source's
+    description: str | None = None  # a merged plugin's; else the source's
 
 
 @dataclass
@@ -142,8 +145,8 @@ def resolve(repo: SourceRepo, profile: Profile) -> Resolution:
             if sid in res.skills:
                 res.errors.append(f"`{sid}` is excluded, but ships: {_chain(res, sid)}")
 
-    layout = Layout(profile.shape, PurePosixPath(profile.root), profile.plugin_name)
-    if layout.shape in ("skills", "plugin"):
+    layout = Layout(profile.shape, PurePosixPath(profile.root), profile.merged_plugin)
+    if layout.flattens:
         by_name: dict[str, list[str]] = defaultdict(list)
         for sid in res.skills:
             by_name[repo.skills[sid].name].append(sid)
@@ -151,7 +154,7 @@ def resolve(repo: SourceRepo, profile: Profile) -> Resolution:
             if len(ids) > 1:
                 where = layout.skill_file(None, name, "").rstrip("/") + "/"
                 res.errors.append(
-                    f"shape `{layout.shape}` puts {', '.join(f'`{i}`' for i in sorted(ids))} "
+                    f"{layout.label} puts {', '.join(f'`{i}`' for i in sorted(ids))} "
                     f"into the same directory `{where}`"
                 )
 
@@ -169,10 +172,10 @@ def resolve(repo: SourceRepo, profile: Profile) -> Resolution:
             res.extras += repo.extras(plugin or None)
     _check_extras(repo, layout, res)
 
-    if layout.is_plugin_shape:
+    if layout.is_marketplace:
         if "" in sources and not repo.home_plugin_name():
             res.errors.append(
-                f"shape `{layout.shape}` needs every shipped skill in a plugin, but the "
+                "shape `marketplace` needs every shipped skill in a plugin, but the "
                 "root skills have no `.claude-plugin/plugin.json` naming one"
             )
         res.plugins = _plugins(repo, profile, layout, sources)
@@ -263,19 +266,54 @@ def _check_extras(repo: SourceRepo, layout: Layout, res: Resolution) -> None:
             continue
         if dest.endswith(".mcp.json"):
             try:
-                merge_mcp([(repo.root / p).read_bytes() for p in paths], paths)
+                merge_mcp(
+                    [(repo.root / p).read_bytes() for p in paths],
+                    paths,
+                    layout.unflattened_hint,
+                )
             except SkillshipError as exc:
                 res.errors.append(str(exc))
             continue
+        if PurePosixPath(dest).name == connectors.FILE:
+            continue  # merged into one file, see `connectors`
         contents = {(repo.root / p).read_bytes().replace(b"\r\n", b"\n") for p in paths}
         if len(contents) > 1:
             res.errors.append(
-                f"shape `{layout.shape}` puts {', '.join(f'`{p}`' for p in paths)} on the "
-                f"same path `{dest}` -- use shape `plugins`, or `plugin-extras.mcp: false`"
+                f"{layout.label} puts {', '.join(f'`{p}`' for p in paths)} on the "
+                f"same path `{dest}` -- {layout.unflattened_hint}, "
+                "or `plugin-extras.mcp: false`"
             )
 
 
-def merge_mcp(contents: list[bytes], paths: list[str]) -> dict[str, Any]:
+def merge_order(repo: SourceRepo, paths: list[str]) -> list[str]:
+    """Files of several source plugins in the order they are merged: a plugin after those it depends on.
+
+    The text of a plugin builds on that of the plugins it depends on, so theirs
+    comes first. Plugins that do not depend on each other keep their name order.
+    """
+    by_plugin = {extra_source(repo, p)[0] or "": p for p in sorted(paths)}
+
+    def deps(plugin: str) -> set[str]:
+        found = repo.manifest(plugin or None).get("dependencies", [])
+        names = set()
+        for dep in found if isinstance(found, list) else []:
+            name = dep.get("name", "") if isinstance(dep, dict) else str(dep)
+            names.add(str(name).partition("@")[0])
+        return names & set(by_plugin)
+
+    out: list[str] = []
+    left = sorted(by_plugin)
+    while left:
+        ready = [p for p in left if not (deps(p) & set(left)) - {p}]
+        nxt = ready[0] if ready else left[0]  # a cycle: fall back to name order
+        left.remove(nxt)
+        out.append(by_plugin[nxt])
+    return out
+
+
+def merge_mcp(
+    contents: list[bytes], paths: list[str], hint: str = "use shape `marketplace`"
+) -> dict[str, Any]:
     """`.mcp.json` files merged: their servers side by side; one name with two configs fails."""
     servers: dict[str, Any] = {}
     owner: dict[str, str] = {}
@@ -290,7 +328,7 @@ def merge_mcp(contents: list[bytes], paths: list[str]) -> dict[str, Any]:
             if name in servers and servers[name] != server:
                 raise SkillshipError(
                     f"`{owner[name]}` and `{path}` configure MCP server `{name}` "
-                    "differently -- use shape `plugins`, or `plugin-extras.mcp: false`"
+                    f"differently -- {hint}, or `plugin-extras.mcp: false`"
                 )
             servers[name], owner[name] = server, path
     return {"mcpServers": dict(sorted(servers.items()))}
@@ -345,15 +383,16 @@ def _plugins(
         return out
 
     plugin_names = sorted(n for n in shipped if n)
-    if layout.shape == "plugins":
+    if not layout.merged:
         return [PluginEntry(n, [n], trimmed(n)) for n in plugin_names]
     outside: list[Any] = []
     for n in plugin_names:
         for dep in trimmed(n):
             if not split(dep)[1] and dep not in outside:
                 outside.append(dep)
-    assert layout.name
-    return [PluginEntry(layout.name, plugin_names, outside, profile.plugin_description)]
+    return [
+        PluginEntry(layout.merged, plugin_names, outside, profile.merged_description)
+    ]
 
 
 # -- rewriting --------------------------------------------------------------
@@ -364,18 +403,48 @@ def rewriter(repo: SourceRepo, layout: Layout, shipped: list[str]) -> Rewriter:
     for s in repo.skills.values():
         if s.plugin:  # shared-material too: `requires` can name it
             skills_of[s.plugin].add(s.name)
-    return Rewriter(dict(skills_of), set(shipped), layout.shape, layout.name)
+    return Rewriter(dict(skills_of), set(shipped), layout.flattens, layout.merged)
 
 
 def rewrite_file(
-    rw: Rewriter, repo: SourceRepo, path: str, skill: str | None
+    rw: Rewriter,
+    repo: SourceRepo,
+    path: str,
+    skill: str | None,
+    merged: list[str] | None = None,
 ) -> Rewritten | None:
-    """The delivered copy of a text file; None for a binary one."""
+    """The delivered copy of a text file; None for a binary one.
+
+    `merged` lists the files `path` is merged with. A link among them is
+    pointed at the merged file first, so that its path, which names a source
+    plugin, is not taken for a mention of that plugin.
+    """
     text = read_text(repo, path)
     if text is None:
         return None
+    if merged:
+        text = connectors.retarget(text, path, merged)
     plugin = repo.skills[skill].plugin if skill else None
     return rw.rewrite(text, skill, plugin=plugin)
+
+
+def merged_docs(
+    repo: SourceRepo, layout: Layout, extras: list[str]
+) -> dict[str, list[str]]:
+    """Delivered path -> the `CONNECTORS.md` files merged into it, in merge order; merges only."""
+    by_dest: dict[str, list[str]] = defaultdict(list)
+    for path in extras:
+        if PurePosixPath(path).name != connectors.FILE:
+            continue
+        try:
+            by_dest[extra_dest(repo, layout, path)].append(path)
+        except SkillshipError:
+            pass  # reported by `_check_extras`
+    return {
+        dest: merge_order(repo, paths)
+        for dest, paths in by_dest.items()
+        if len(paths) > 1
+    }
 
 
 def _rewrite(
@@ -385,8 +454,13 @@ def _rewrite(
     rw = rewriter(repo, layout, list(res.skills))
     texts: dict[str, str] = {}
     acknowledged = {p for p in profile.acknowledge if p in repo.plugin_names()}
+    group = {
+        path: paths
+        for paths in merged_docs(repo, layout, res.extras).values()
+        for path in paths
+    }
     for path, label, skill in delivered_texts(repo, res.files, res.extras):
-        out = rewrite_file(rw, repo, path, skill)
+        out = rewrite_file(rw, repo, path, skill, group.get(path))
         if out is None:
             continue
         if skill:
@@ -486,6 +560,8 @@ def _dead_links(repo: SourceRepo, layout: Layout, res: Resolution) -> list[DeadL
             dest_target = _normjoin(str(PurePosixPath(dest).parent), path)
             if dest_target in present or dest_target in dirs:
                 continue
+            if delivered.get(source_target) == dest:
+                continue  # a file merged into this one; `connectors.retarget` points it here
             line = text.count("\n", 0, m.start()) + 1
             out.append(
                 DeadLink(f"{src}:{line}", target, _link_fix(repo, source_target))

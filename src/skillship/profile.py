@@ -24,6 +24,25 @@ LOCK = "distro.lock.yaml"
 BUILD_TARGETS_IMPLEMENTED = ("archive", "skill-upload", "plugin-upload", "agensi")
 DELIVER_TARGETS_IMPLEMENTED = (*BUILD_TARGETS_IMPLEMENTED, "git")
 
+# The recipient of a profile that names none, by what its targets build. A zip
+# is handed over by whatever channel is at hand, and an upload file is uploaded
+# by whoever got it, so neither needs a named recipient; a git target and an
+# Agensi pack do.
+HANDOVER_RECIPIENTS = {
+    "archive": "one-off hand-overs by email, Slack, WhatsApp and the like",
+    "skill-upload": "one-off or repeated uploads into Claude Desktop and claude.ai",
+    "plugin-upload": "one-off or repeated uploads into Claude Desktop and claude.ai",
+}
+
+
+def default_recipient(targets: list[dict[str, Any]]) -> str | None:
+    """The recipient of a profile without one, or None when its targets need one named."""
+    types = [t.get("type") for t in targets]
+    if not types or any(t not in HANDOVER_RECIPIENTS for t in types):
+        return None
+    ways = list(dict.fromkeys(HANDOVER_RECIPIENTS[t] for t in types))
+    return "Early adopters, " + ", and ".join(ways)
+
 
 @dataclass
 class Profile:
@@ -37,8 +56,8 @@ class Profile:
     file_excludes: list[str] = field(default_factory=list)
     shape: str = "skills"
     root: str = "."
-    plugin_name: str | None = None  # the merged plugin, shape `plugin`
-    plugin_description: str | None = None
+    merged_plugin: str | None = None  # layout.merged-plugin.name
+    merged_description: str | None = None
     marketplace: str | None = None
     license: str = "inherit"
     targets: list[dict[str, Any]] = field(default_factory=list)
@@ -82,26 +101,44 @@ def load(source_root: Path, name: str) -> Profile:
             f"  {'/'.join(str(p) for p in e.absolute_path) or '(top level)'}: {e.message}"
             for e in errors
         ]
+        old = data.get("layout", {}).get("shape") if isinstance(data, dict) else None
+        if old == "plugins":
+            lines.append("  shape `plugins` is now `marketplace`")
+        elif old == "plugin":
+            lines.append(
+                "  shape `plugin` is now `marketplace` with "
+                "`merged-plugin: {name: ..., description: ...}`"
+            )
         raise SkillshipError(
             f"{DISTROS_DIR}/{name}/{PROFILE} is invalid:\n" + "\n".join(lines)
         )
     layout = data.get("layout", {})
+    targets = data.get("targets", [])
+    recipient = data.get("recipient")
+    if recipient is None:
+        recipient = default_recipient(targets)
+        if recipient is None:
+            raise SkillshipError(
+                f"{DISTROS_DIR}/{name}/{PROFILE} is invalid:\n"
+                "  (top level): `recipient` is required unless every target is an "
+                "`archive`, a `skill-upload` or a `plugin-upload`"
+            )
     return Profile(
         name=name,
         path=path,
         digest="sha256:" + hashlib.sha256(raw).hexdigest(),
-        recipient=data["recipient"],
+        recipient=recipient,
         include=data["include"],
         exclude=data.get("exclude", []),
         acknowledge=data.get("acknowledge", []),
         file_excludes=data.get("files", {}).get("exclude", []),
         shape=layout.get("shape", "skills"),
         root=layout.get("root", "."),
-        plugin_name=layout.get("name"),
-        plugin_description=layout.get("description"),
+        merged_plugin=layout.get("merged-plugin", {}).get("name"),
+        merged_description=layout.get("merged-plugin", {}).get("description"),
         marketplace=layout.get("marketplace"),
         license=data.get("license", "inherit"),
-        targets=data.get("targets", []),
+        targets=targets,
         extras=data.get("plugin-extras", {}),
         target_files=data.get("target-files", {}),
         version=data.get("version", "bump-patch"),
@@ -111,12 +148,12 @@ def load(source_root: Path, name: str) -> Profile:
 
 
 def readme(profile: Profile) -> bool:
-    """Whether the delivery gets a generated README: always in the plugin shapes."""
+    """Whether the delivery gets a generated README: always in a marketplace."""
     where = f"{DISTROS_DIR}/{profile.name}/{PROFILE}"
-    if profile.shape in ("plugins", "plugin"):
+    if profile.shape == "marketplace":
         if profile.extras.get("readme") is False:
             raise SkillshipError(
-                f"{where}: shape `{profile.shape}` always generates a README per plugin, "
+                f"{where}: shape `marketplace` always generates a README per plugin, "
                 "because the source README lists skills that do not ship -- remove "
                 "`plugin-extras.readme: false`"
             )

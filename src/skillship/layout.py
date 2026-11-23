@@ -1,13 +1,19 @@
-"""Where each delivered file goes, per layout shape.
+"""Where each delivered file goes, per layout.
 
-| Shape     | Skills                                     | Plugin files (manifest, README, MCP extras) |
-| --------- | ------------------------------------------ | ------------------------------------------- |
-| `skills`  | `<root>/skills/<skill>/`                   | `<root>/` (README and MCP extras only)      |
-| `plugins` | `<root>/plugins/<plugin>/skills/<skill>/`  | `<root>/plugins/<plugin>/`                  |
-| `plugin`  | `<root>/plugins/<name>/skills/<skill>/`    | `<root>/plugins/<name>/`                    |
+| Layout                             | Skills                                     | Plugin files (manifest, README, MCP extras) |
+| ---------------------------------- | ------------------------------------------ | ------------------------------------------- |
+| `skills`                           | `<root>/skills/<skill>/`                   | `<root>/` (README and MCP extras only)      |
+| `marketplace`                      | `<root>/plugins/<plugin>/skills/<skill>/`  | `<root>/plugins/<plugin>/`                  |
+| `marketplace` with `merged-plugin` | `<root>/plugins/<name>/skills/<skill>/`    | `<root>/plugins/<name>/`                    |
 
-The plugin shapes add `<root>/.claude-plugin/marketplace.json`, listing the
-delivered plugins, so the tree is a marketplace a recipient can add as it is.
+A marketplace adds `<root>/.claude-plugin/marketplace.json`, listing the
+delivered plugins, so a recipient can add the tree as it is. It keeps the
+source's plugins, one or several, unless `merged-plugin` names the one plugin
+they are merged into.
+
+The `skills` shape and a merged marketplace **flatten**: the source plugins do
+not survive, so their files share one directory, and text naming them is
+rewritten (see `rewrite`).
 """
 
 from __future__ import annotations
@@ -18,7 +24,7 @@ from typing import Any
 
 from skillship.errors import SkillshipError
 
-PLUGIN_SHAPES = ("plugins", "plugin")
+SHAPES = ("skills", "marketplace")
 MARKETPLACE = ".claude-plugin/marketplace.json"
 MANIFEST = ".claude-plugin/plugin.json"
 README = "README.md"
@@ -43,44 +49,65 @@ def check_dest(path: str) -> str:
 class Layout:
     shape: str
     root: PurePosixPath
-    name: str | None = None  # the merged plugin, shape `plugin`
+    merged: str | None = None  # the plugin a marketplace merges its source plugins into
 
     @classmethod
     def from_lock(cls, data: dict[str, Any]) -> Layout:
         layout = data.get("layout", {})
         shape = layout.get("shape")
-        if shape not in ("skills", *PLUGIN_SHAPES):
-            raise SkillshipError(f"the lock's layout shape `{shape}` is unknown")
+        if shape not in SHAPES:
+            raise SkillshipError(
+                f"the lock's layout shape `{shape}` is unknown -- run `skillship lock`"
+            )
         root = PurePosixPath(layout.get("root", "."))
         if root.is_absolute() or ".." in root.parts:
             raise SkillshipError(
                 f"the lock's layout root `{root}` leaves the delivery tree"
             )
-        name = layout.get("name")
-        if shape == "plugin" and not name:
-            raise SkillshipError("the lock's layout has shape `plugin` but no `name`")
-        if name:
-            check_name(name)
-        return cls(shape, root, name)
+        merged = layout.get("merged-plugin")
+        if merged:
+            if shape != "marketplace":
+                raise SkillshipError(
+                    f"the lock's layout has a `merged-plugin` in shape `{shape}`"
+                )
+            check_name(merged)
+        return cls(shape, root, merged or None)
 
     @property
-    def is_plugin_shape(self) -> bool:
-        return self.shape in PLUGIN_SHAPES
+    def is_marketplace(self) -> bool:
+        return self.shape == "marketplace"
+
+    @property
+    def flattens(self) -> bool:
+        """Whether the source plugins do not survive: in `skills`, and in a merged marketplace."""
+        return not self.is_marketplace or self.merged is not None
+
+    @property
+    def label(self) -> str:
+        """What a message calls this layout, by the profile key that chose it."""
+        return "`merged-plugin`" if self.merged else f"shape `{self.shape}`"
+
+    @property
+    def unflattened_hint(self) -> str:
+        """The profile change that keeps the source plugins apart."""
+        if self.merged:
+            return "drop `merged-plugin`"
+        return "use shape `marketplace`"
 
     def plugin_name(self, home: str | None) -> str | None:
         """The delivered plugin that receives the files of source plugin `home`."""
-        if self.shape == "plugins":
+        if self.is_marketplace and not self.merged:
             return home
-        return self.name  # None in shape `skills`
+        return self.merged  # None in shape `skills`
 
     def plugin_dir(self, home: str | None) -> PurePosixPath:
-        if self.shape == "skills":
+        if not self.is_marketplace:
             return self.root
         name = self.plugin_name(home)
         if not name:
             raise SkillshipError(
-                "shape `plugins` needs every shipped skill in a plugin, but the source "
-                "repo's root skills have no `.claude-plugin/plugin.json` naming one"
+                "shape `marketplace` needs every shipped skill in a plugin, but the "
+                "source repo's root skills have no `.claude-plugin/plugin.json` naming one"
             )
         return self.root / "plugins" / check_name(name)
 
@@ -98,7 +125,7 @@ class Layout:
     ) -> dict[str, tuple[str, str | None]]:
         """The files skillship writes itself: delivered path -> (kind, delivered plugin)."""
         out: dict[str, tuple[str, str | None]] = {}
-        if self.is_plugin_shape:
+        if self.is_marketplace:
             out[self.root_file(MARKETPLACE)] = ("marketplace", None)
             for p in plugins:
                 base = self.root / "plugins" / check_name(p)

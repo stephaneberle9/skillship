@@ -111,7 +111,7 @@ def target(tmp_path: Path, signing: None) -> Path:
 
 @pytest.fixture
 def distro(source: Path, target: Path) -> Path:
-    """The `acme` distro in shape `plugin`, delivered by push to `target`; source committed."""
+    """The `acme` distro as a marketplace with a merged plugin, delivered by push to `target`; source committed."""
     (source / "distros").mkdir(exist_ok=True)
     (source / "distros/skillship.yaml").write_text(SETTINGS, encoding="utf-8")
     for rel, text in {
@@ -136,7 +136,7 @@ def profile(target: Path, extra: str = "", forge: str = "github") -> str:
         "include: [billing:invoice-draft]\n"
         "acknowledge: [ledger:ledger-audit]\n"
         "license: none\n"
-        "layout:\n  shape: plugin\n  name: acme-billing\n  description: ACME billing.\n"
+        "layout:\n  shape: marketplace\n  merged-plugin:\n    name: acme-billing\n    description: ACME billing.\n"
         f"targets:\n  - type: git\n    url: {target.as_uri()}\n    branch: main\n"
         f"    forge: {forge}\n" + extra
     )
@@ -201,9 +201,9 @@ def test_opting_out_of_an_unknown_set_is_refused(distro: Path, target: Path, cap
     assert "names no set of distros/skillship.yaml" in capsys.readouterr().err
 
 
-def test_no_target_files_without_a_plugin_shape(distro: Path, target: Path):
+def test_no_target_files_without_a_marketplace(distro: Path, target: Path):
     text = profile(target).replace(
-        "shape: plugin\n  name: acme-billing\n  description: ACME billing.\n",
+        "shape: marketplace\n  merged-plugin:\n    name: acme-billing\n    description: ACME billing.\n",
         "shape: skills\n",
     )
     write_profile(distro, "acme", text)

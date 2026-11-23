@@ -211,7 +211,7 @@ def test_plugin_upload_writes_one_zip_per_plugin(ledger, capsys):
     status, data = lock(
         ledger,
         "recipient: ACME\ninclude: [billing:invoice-knowledge]\nlicense: inherit\n"
-        "layout: {shape: plugins}\ntargets: [{type: plugin-upload}]\n",
+        "layout: {shape: marketplace}\ntargets: [{type: plugin-upload}]\n",
     )
     assert status == 0
     assert "uploads" not in data  # frontmatter kept, nothing leaves a plugin
@@ -237,7 +237,7 @@ def test_plugin_upload_reports_a_path_into_another_plugin(ledger):
     _, data = lock(
         ledger,
         "recipient: ACME\ninclude: [billing:invoice-knowledge]\nlicense: none\n"
-        "layout: {shape: plugins}\ntargets: [{type: plugin-upload}]\n",
+        "layout: {shape: marketplace}\ntargets: [{type: plugin-upload}]\n",
     )
     assert data["uploads"]["unresolved"] == [
         {
@@ -248,7 +248,7 @@ def test_plugin_upload_reports_a_path_into_another_plugin(ledger):
     ]
 
 
-def test_plugin_upload_needs_a_plugin_shape(source, capsys):
+def test_plugin_upload_needs_a_marketplace(source, capsys):
     status, _ = lock(
         source,
         PROFILE.replace("ledger-close", "tax-report")
@@ -256,7 +256,7 @@ def test_plugin_upload_needs_a_plugin_shape(source, capsys):
     )
     assert status == 1
     assert (
-        "`plugin-upload` needs shape `plugins` or `plugin`, not `skills`"
+        "`plugin-upload` needs shape `marketplace`, not `skills`"
         in capsys.readouterr().err
     )
 
@@ -318,10 +318,10 @@ def test_agensi_needs_shape_skills(source, capsys):
     status, _ = lock(
         source,
         "recipient: ACME\ninclude: [ledger:tax-report]\nlicense: none\n"
-        "layout: {shape: plugins}\ntargets: [{type: agensi}]\n",
+        "layout: {shape: marketplace}\ntargets: [{type: agensi}]\n",
     )
     assert status == 1
-    assert "`agensi` needs shape `skills`, not `plugins`" in capsys.readouterr().err
+    assert "`agensi` needs shape `skills`, not `marketplace`" in capsys.readouterr().err
 
 
 def test_agensi_refuses_a_binary_file(source, capsys):

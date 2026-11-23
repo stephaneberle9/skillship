@@ -1,7 +1,7 @@
 """The source repo's own settings, `distros/skillship.yaml`, shared by all its distros.
 
 Today it holds `target-files`: named sets of non-skill files that a `git` target
-in a plugin shape receives, each with the ownership it is delivered with and an
+of a marketplace receives, each with the ownership it is delivered with and an
 optional `gate`, the command `deliver` runs against the target clone before
 pushing. A seeded file may be made of several source files, joined in order, and
 may name an `announce` file: the text a delivery shows the recipient when the
@@ -93,7 +93,7 @@ def git_targets(profile: Profile) -> list[dict[str, Any]]:
 
 
 def target_file_sets(repo: SourceRepo, profile: Profile) -> list[TargetFileSet]:
-    """The target-file sets this distro delivers: none unless a `git` target gets a plugin shape.
+    """The target-file sets this distro delivers: none unless a `git` target gets a marketplace.
 
     A file restricted to one forge is listed when some `git` target is on that forge.
     """
@@ -107,7 +107,7 @@ def target_file_sets(repo: SourceRepo, profile: Profile) -> list[TargetFileSet]:
                 f"{DISTROS_DIR}/{SETTINGS}"
             )
     targets = git_targets(profile)
-    if profile.shape not in ("plugins", "plugin") or not targets:
+    if profile.shape != "marketplace" or not targets:
         return []
     forges = {forge_of(t) for t in targets}
     out = []

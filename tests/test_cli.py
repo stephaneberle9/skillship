@@ -149,8 +149,8 @@ def test_explain_prints_each_rewrite_before_and_after(source, capsys):
     ) in out
 
 
-def test_shape_plugins_only_prunes_suggests(source, capsys):
-    write_profile(source, "acme", PROFILE + "layout: {shape: plugins}\n")
+def test_shape_marketplace_only_prunes_suggests(source, capsys):
+    write_profile(source, "acme", PROFILE + "layout: {shape: marketplace}\n")
     assert run(source, "lock", "acme", "--explain") == 0
     out = capsys.readouterr().out
     assert "rewritten: 1 rewrites in 1 files" in out

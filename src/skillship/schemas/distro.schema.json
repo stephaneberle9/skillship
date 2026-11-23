@@ -4,10 +4,10 @@
   "title": "skillship distro profile (distro.yaml)",
   "type": "object",
   "additionalProperties": false,
-  "required": ["recipient", "include"],
+  "required": ["include"],
   "properties": {
     "recipient": {
-      "description": "Who receives this distro, for people reading the profile.",
+      "description": "Who receives this distro, for people reading the profile. Required unless every target is an `archive`, a `skill-upload` or a `plugin-upload`; such a profile defaults to early adopters who are handed the zip or upload it themselves.",
       "type": "string",
       "minLength": 1
     },
@@ -33,7 +33,7 @@
           "type": "boolean"
         },
         "readme": {
-          "description": "Generate a README listing the shipped skills; always on in the plugin shapes.",
+          "description": "Generate a README listing the shipped skills; always on in a marketplace.",
           "type": "boolean"
         }
       }
@@ -52,30 +52,41 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "shape": { "enum": ["skills", "plugins", "plugin"] },
+        "shape": {
+          "description": "`skills`: the skills side by side, without plugins. `marketplace`: the source's plugins that ship a skill, one or several, with a generated `marketplace.json`.",
+          "enum": ["skills", "marketplace"]
+        },
         "root": {
           "description": "Subdirectory inside the target that receives the tree: a relative path without `..`.",
           "type": "string",
           "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
         },
-        "name": {
-          "description": "Name of the merged plugin, for shape `plugin`.",
-          "type": "string",
-          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
-        },
-        "description": {
-          "description": "Description of the merged plugin, for shape `plugin`.",
-          "type": "string",
-          "minLength": 1
+        "merged-plugin": {
+          "description": "The one plugin of the marketplace that every shipped skill is merged into, whichever source plugin it comes from. Without it the marketplace keeps the source's plugins. Shape `marketplace` only.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": {
+              "description": "Name of the merged plugin.",
+              "type": "string",
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+            },
+            "description": {
+              "description": "Description of the merged plugin.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
         },
         "marketplace": {
-          "description": "Name of the generated marketplace, for shapes `plugins` and `plugin`. Defaults to the distro name.",
+          "description": "Name of the generated marketplace, for shape `marketplace`. Defaults to the distro name.",
           "type": "string",
           "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
         }
       },
-      "if": { "properties": { "shape": { "const": "plugin" } }, "required": ["shape"] },
-      "then": { "required": ["name"] }
+      "if": { "required": ["merged-plugin"] },
+      "then": { "properties": { "shape": { "const": "marketplace" } }, "required": ["shape"] }
     },
     "license": {
       "description": "`inherit`, `none`, or an SPDX license identifier.",

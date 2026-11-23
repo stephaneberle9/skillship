@@ -59,7 +59,7 @@ passes through the conversation.
 ```text
 You: Give ACME the billing skills as a plugin in their GitLab repo, through merge requests.
 
-Claude: Drafts distros/acme/distro.yaml (include billing:invoice-*, shape plugin,
+Claude: Drafts distros/acme/distro.yaml (include billing:invoice-*, a merged plugin,
        a git target in merge-request mode) → runs lock → goes through the two
        blocking mentions with you → dry-runs the delivery
 ```

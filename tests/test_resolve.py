@@ -176,14 +176,26 @@ def test_root_skills_have_bare_ids(tmp_path):
 @pytest.mark.parametrize(
     ("text", "message"),
     [
-        ("include: [x]\n", "'recipient' is a required property"),
+        ("include: [x]\n", "`recipient` is required unless every target is an"),
         (
             "recipient: A\ninclude: []\n",
             "include: []",
         ),  # the rest of the message differs between jsonschema versions
         (
             "recipient: A\ninclude: [x]\nlayout: {shape: plugin}\n",
+            "shape `plugin` is now `marketplace` with `merged-plugin",
+        ),
+        (
+            "recipient: A\ninclude: [x]\nlayout: {shape: plugins}\n",
+            "shape `plugins` is now `marketplace`",
+        ),
+        (
+            "recipient: A\ninclude: [x]\nlayout: {shape: marketplace, merged-plugin: {}}\n",
             "'name' is a required property",
+        ),
+        (
+            "recipient: A\ninclude: [x]\nlayout: {merged-plugin: {name: m}}\n",
+            "'shape' is a required property",
         ),
         (
             "recipient: A\ninclude: [x]\ntargets: [{type: archive, url: u}]\n",
@@ -252,4 +264,43 @@ def test_a_tracked_symlink_is_refused(source):
 def test_paths_that_leave_the_delivery_are_refused(source, extra):
     write_profile(source, "acme", "recipient: A\ninclude: [x]\n" + extra)
     with pytest.raises(SkillshipError, match="does not match"):
+        profile.load(source, "acme")
+
+
+@pytest.mark.parametrize(
+    ("types", "recipient"),
+    [
+        (
+            ["archive"],
+            "Early adopters, one-off hand-overs by email, Slack, WhatsApp and the like",
+        ),
+        (
+            ["skill-upload", "plugin-upload"],
+            "Early adopters, one-off or repeated uploads into Claude Desktop and claude.ai",
+        ),
+        (
+            ["archive", "plugin-upload"],
+            (
+                "Early adopters, one-off hand-overs by email, Slack, WhatsApp and the "
+                "like, and one-off or repeated uploads into Claude Desktop and claude.ai"
+            ),
+        ),
+    ],
+)
+def test_a_profile_of_handover_targets_defaults_its_recipient(source, types, recipient):
+    targets = "targets:\n" + "".join(f"  - type: {t}\n" for t in types)
+    write_profile(source, "acme", "include: [ledger:tax-report]\n" + targets)
+    assert profile.load(source, "acme").recipient == recipient
+
+
+@pytest.mark.parametrize(
+    "targets",
+    [
+        "",
+        "targets:\n  - type: archive\n  - type: agensi\n",
+    ],
+)
+def test_a_profile_without_recipient_needs_handover_targets_only(source, targets):
+    write_profile(source, "acme", "include: [ledger:tax-report]\n" + targets)
+    with pytest.raises(SkillshipError, match="`recipient` is required"):
         profile.load(source, "acme")

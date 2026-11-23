@@ -8,17 +8,18 @@ entries that ship. An entry naming a skill the recipient does not get points
 at nothing in the delivered tree, and the plugin checks fail it as `REQUIRE`.
 The lock's `suggested` section still records what was suggested.
 
-**Flattening, shapes `skills` and `plugin`.** In the `skills` shape no plugin
-exists, and in the `plugin` shape only the merged one does, so a
-plugin-qualified name would name a plugin the recipient never gets. Only where
-the named plugin is one of the source repo's and the named skill ships:
+**Flattening, shape `skills` and a merged marketplace.** In the `skills` shape
+no plugin exists, and in a marketplace with `merged-plugin` only the merged one
+does, so a plugin-qualified name would name a plugin the recipient never gets.
+Only where the named plugin is one of the source repo's and the named skill
+ships:
 
 - the call form `/plugin:skill` becomes `/skill` (shape `skills`) or
-  `/merged:skill` (shape `plugin`), and likewise without the slash; inside a
+  `/merged:skill` (merged marketplace), and likewise without the slash; inside a
   SKILL.md frontmatter, as in `metadata.requires`, the qualifier is dropped;
 - the attribution "the `skill` skill (`plugin` plugin)", or "…, `plugin`
   plugin)", loses the plugin (shape `skills`) or names the merged plugin
-  (shape `plugin`).
+  (merged marketplace).
 
 Every other mention of a source plugin that ships skills matches no pattern and
 is reported as unflattened, because a guess could change what the text means.
@@ -72,15 +73,16 @@ class Rewriter:
     """Rewrites the delivered text of one delivery.
 
     `skills_of` maps every plugin of the source repo to the names of its skills,
-    and `shipped` holds the ids of the skills that ship. `shape` is the layout
-    shape, and `merged` the merged plugin's name in the `plugin` shape.
+    and `shipped` holds the ids of the skills that ship. `flattening` says
+    whether the source plugins do not survive, and `merged` names the plugin
+    they are merged into, if any.
     """
 
     def __init__(
         self,
         skills_of: dict[str, set[str]],
         shipped: set[str],
-        shape: str,
+        flattening: bool,
         merged: str | None = None,
     ) -> None:
         self.skills_of = skills_of
@@ -89,8 +91,8 @@ class Rewriter:
             p: {s for s in skills if f"{p}:{s}" in shipped}
             for p, skills in skills_of.items()
         }
-        self.flattening = shape in ("skills", "plugin")
-        self.merged = merged if shape == "plugin" else None
+        self.flattening = flattening
+        self.merged = merged if flattening else None
         plugins = sorted(
             (p for p, s in self.shipped.items() if s), key=lambda p: (-len(p), p)
         )

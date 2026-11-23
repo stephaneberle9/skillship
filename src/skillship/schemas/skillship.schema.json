@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "properties": {
     "target-files": {
-      "description": "Named sets of non-skill files a `git` target in a plugin shape receives, such as the recipient's CI checks. A profile opts out of a set with `target-files: {<set>: false}`.",
+      "description": "Named sets of non-skill files a `git` target of a marketplace receives, such as the recipient's CI checks. A profile opts out of a set with `target-files: {<set>: false}`.",
       "type": "object",
       "propertyNames": { "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
       "additionalProperties": { "$ref": "#/$defs/set" }

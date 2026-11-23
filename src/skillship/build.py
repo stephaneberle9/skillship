@@ -9,10 +9,12 @@ from git, and text files with LF line endings. Two builds of the same lock from
 the same source commit produce the same bytes.
 
 Besides the skills and extras the lock lists, build writes the files the lock
-lists under `generated`: in the plugin shapes a `plugin.json` and a README per
+lists under `generated`: in a marketplace a `plugin.json` and a README per
 delivered plugin and the `marketplace.json`, in the `skills` shape a README
 when the profile asks for one. Every delivered text file is rewritten as the
-lock counts (see `rewrite`).
+lock counts (see `rewrite`). Where a flattening layout puts several source
+plugins' `.mcp.json` or `CONNECTORS.md` on one path, build writes the merged
+file (see `connectors`).
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from typing import Any
 
 import yaml
 
-from skillship import preflight, upload
+from skillship import connectors, preflight, upload
 from skillship.errors import NotImplementedYet, SkillshipError
 from skillship.layout import Layout, check_dest
 from skillship.profile import BUILD_TARGETS_IMPLEMENTED, Profile
@@ -38,6 +40,7 @@ from skillship.resolve import (
     extra_dest,
     extra_source,
     merge_mcp,
+    merged_docs,
     rewrite_file,
     rewriter,
 )
@@ -191,8 +194,8 @@ def delivered(
             raise SkillshipError(f"two files of the lock land on `{dest}`")
         out[dest] = DeliveredFile(data, mode, ownership, source)
 
-    def content(src: str, skill: str | None) -> bytes:
-        out = rewrite_file(rw, repo, src, skill)
+    def content(src: str, skill: str | None, merged: list[str] | None = None) -> bytes:
+        out = rewrite_file(rw, repo, src, skill, merged)
         if out is None:  # binary, or text in another encoding: not rewritten
             return normalized((repo.root / src).read_bytes())
         return out.text.encode("utf-8")
@@ -221,11 +224,17 @@ def delivered(
             )
 
     mcp: dict[str, list[str]] = {}
-    for extra in lock.get("extras", []):
+    extras = lock.get("extras", [])
+    for extra in extras:
         _check_extra(repo, extra)
+    docs = merged_docs(repo, layout, extras)
+    in_docs = {path for paths in docs.values() for path in paths}
+    for extra in extras:
         dest = extra_dest(repo, layout, extra)
         if dest.endswith(".mcp.json"):
             mcp.setdefault(dest, []).append(extra)
+        elif extra in in_docs:
+            continue
         elif (
             dest not in out
         ):  # two plugins' identical copies; `lock` refuses differing ones
@@ -233,6 +242,9 @@ def delivered(
     for dest, paths in mcp.items():
         merged = merge_mcp([(repo.root / p).read_bytes() for p in paths], paths)
         put(dest, json_bytes(merged), 0o644)
+    for dest, paths in docs.items():
+        texts = [content(p, None, paths).decode("utf-8") for p in paths]
+        put(dest, connectors.merge(texts).encode("utf-8"), 0o644)
 
     plugins = {p["name"]: p for p in lock.get("plugins", [])}
     expected = layout.generated(list(plugins), readme=True)
@@ -287,7 +299,7 @@ def _manifest(
     repo: SourceRepo, profile: Profile, layout: Layout, entry: dict[str, Any]
 ) -> dict[str, Any]:
     manifests = _sources(repo, entry)
-    if layout.shape == "plugins":
+    if not layout.merged:
         out = {k: v for k, v in manifests[0].items() if k not in _DROPPED_KEYS}
         out["name"] = entry["name"]
     else:
@@ -310,7 +322,7 @@ def _manifest(
 
 
 def _description(repo: SourceRepo, layout: Layout, entry: dict[str, Any]) -> str | None:
-    if layout.shape == "plugin":
+    if layout.merged:
         return entry.get("description")
     value = _sources(repo, entry)[0].get("description")
     return value if isinstance(value, str) else None
