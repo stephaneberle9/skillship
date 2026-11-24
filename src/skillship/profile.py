@@ -30,7 +30,15 @@ DELIVER_TARGETS_IMPLEMENTED = (*BUILD_TARGETS_IMPLEMENTED, "git")
 # it is installed. A git target and an Agensi pack need one named.
 HANDOVER = "Early adopters, one-off hand-overs by email, Slack, WhatsApp and the like"
 CLAUDE_CODE = "Claude Code"  # copies skills, adds a marketplace
-UPLOADS = "Claude Desktop and claude.ai"  # take a plugin as an upload
+# take a plugin as an upload, and a zip of skills as one too
+UPLOADS = "Claude Desktop and claude.ai"
+# Where an archive of each shape is installed; a target without a layout
+# has shape `skills`.
+_CLIENTS = {
+    "plugin": (UPLOADS,),
+    "marketplace": (CLAUDE_CODE,),
+}
+_SKILLS_CLIENTS = (CLAUDE_CODE, UPLOADS)
 
 # The keys a target's `layout` takes besides `shape` and `root`, per shape.
 _LAYOUT_KEYS = {
@@ -48,7 +56,7 @@ def default_recipient(targets: list[dict[str, Any]]) -> str | None:
             return None
         layout = target.get("layout")
         shape = layout.get("shape") if isinstance(layout, dict) else None
-        clients.add(UPLOADS if shape == "plugin" else CLAUDE_CODE)
+        clients.update(_CLIENTS.get(shape, _SKILLS_CLIENTS))
     if not clients:
         return None
     # Claude Code first: "Claude Code, Claude Desktop and claude.ai"

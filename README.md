@@ -127,26 +127,27 @@ archives are installed:
 
 | Archive of shape | The default recipient ends with |
 | --- | --- |
-| `skills`, `marketplace` | for Claude Code |
+| `skills` | for Claude Code, Claude Desktop and claude.ai |
 | `plugin` | for Claude Desktop and claude.ai |
+| `marketplace` | for Claude Code |
 
-A profile with both kinds of archive ends with "for Claude Code, Claude Desktop
-and claude.ai". A `git` or `agensi` target needs a named recipient.
+A profile with archives of several shapes names each client once. A `git` or
+`agensi` target needs a named recipient.
 
 A target's `layout.shape` decides how its delivered tree looks. An `archive`
 target zips that tree as `<distro>-<shape>.zip`:
 
 | Shape | Delivered tree | What the receiver does with the zip |
 | --- | --- | --- |
-| `skills` (the default) | `skills/<skill>/`, every skill side by side, without plugins | Copies the skill folders into `.claude/skills` |
-| `plugin` | One plugin holding every shipped skill: `.claude-plugin/plugin.json`, a README and `skills/<skill>/` | Uploads it as a plugin in Claude Desktop or claude.ai |
+| `skills` (the default) | `skills/<skill>/`, every skill side by side, without plugins | Copies the skill folders into `.claude/skills`, or uploads the zip as a plugin in Claude Desktop or claude.ai, which name the plugin after the file |
+| `plugin` | One plugin holding every shipped skill: `.claude-plugin/plugin.json`, a README and `skills/<skill>/` | Uploads it as a plugin in Claude Desktop or claude.ai, where it carries the name and description of its manifest |
 | `marketplace` | A marketplace: `plugins/<plugin>/` per source plugin that ships a skill, one or several, each with a generated `plugin.json` and README, and a `.claude-plugin/marketplace.json` listing them | Unpacks it and adds the directory with `/plugin marketplace add <directory>` in Claude Code |
 
 Two archives of the same shape would write the same file; give one of them a
 `name`, which replaces the whole file name.
 
 A `plugin` is named after the distro and described by a sentence naming the
-included skills. `name` and `description` on its layout say otherwise:
+included skills, without code formatting, since the clients print it as text. `name` and `description` on its layout say otherwise:
 
 ```yaml
 layout:
@@ -293,16 +294,24 @@ and says so.
 
 ### Uploads
 
-Two things a distro builds are uploaded somewhere rather than copied or added:
+Three things a distro builds can be uploaded somewhere rather than copied or
+added:
 
 | Target | Writes | Upload it at |
 | --- | --- | --- |
+| `archive` of shape `skills` | `<distro>-skills.zip`, the skill folders under `skills/`, without a manifest | Claude Desktop or claude.ai: *Plugins › Add › Upload plugin* |
 | `archive` of shape `plugin` | `<distro>-plugin.zip`, one plugin with `.claude-plugin/plugin.json` at the top | Claude Desktop or claude.ai: *Plugins › Add › Upload plugin* |
 | `agensi` | One Agensi skill pack, `agensi/<name>.zip`, and its pre-flight report, built from the `skills` layout | [Agensi](https://www.agensi.io), a marketplace for paid skills, through its MCP connector |
 
-A plugin keeps the frontmatter Claude Code reads. For either upload, a
-description longer than 1024 characters, or `metadata` that does not map keys
-to strings, blocks the lock.
+Both archives arrive as a plugin holding every shipped skill. For a `skills`
+archive the client writes the manifest itself: the plugin is named after the
+zip file, as in "Acme skills" for `acme-skills.zip`, and has no description.
+Shape `plugin` is for a name and a description of your choosing, and for a
+README at the plugin's root.
+
+A plugin keeps the frontmatter Claude Code reads. For a `plugin` archive and
+an Agensi pack, a description longer than 1024 characters, or `metadata` that
+does not map keys to strings, blocks the lock.
 
 An upload is installed on its own, so a path that leaves it no longer
 resolves. The lock lists each such path that resolves in the source under

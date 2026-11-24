@@ -261,10 +261,10 @@ def default_description(repo: SourceRepo, res: Resolution) -> str:
     included = sorted(
         repo.skills[s].name for s in shipped if res.skills[s].startswith("include ")
     )
+    # plain names: the upload dialog and the plugin page of Claude Desktop and
+    # claude.ai print a description as text, backticks included
     names = " and ".join(
-        [", ".join(f"`{n}`" for n in included[:-1]), f"`{included[-1]}`"]
-        if len(included) > 1
-        else [f"`{n}`" for n in included]
+        [", ".join(included[:-1]), included[-1]] if len(included) > 1 else included
     )
     noun = "skills" if len(included) > 1 else "skill"
     them = "they require" if len(included) > 1 else "it requires"

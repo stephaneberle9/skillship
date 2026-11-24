@@ -77,19 +77,22 @@ repo":
 
    | The receiver | Target |
    | --- | --- |
-   | Copies skills into `.claude/skills` (Claude Code, VS Code) | `archive`, shape `skills` (the default) |
-   | Uploads a plugin in Claude Desktop or claude.ai | `archive`, shape `plugin` |
+   | Copies skills into `.claude/skills` (Claude Code, VS Code), or uploads the zip in Claude Desktop or claude.ai as a plugin named after the file | `archive`, shape `skills` (the default) |
+   | Uploads a plugin in Claude Desktop or claude.ai that carries a name and a description of its own | `archive`, shape `plugin` |
    | Adds a marketplace in Claude Code, keeping the source's plugins apart | `archive`, shape `marketplace` |
    | Gets commits into a repository of their own | `git`, shape `skills` or `marketplace`, with `url`, `branch` and `mode` (`push`, `pull-request` on GitHub, `merge-request` on GitLab) |
    | Buys it on Agensi | `agensi` |
 
-   An archive is named `<distro>-<shape>.zip`. When the receivers use both
-   Claude Code and Claude Desktop, add both archives to the one distro rather
-   than writing a second distro.
+   An archive is named `<distro>-<shape>.zip`. A `skills` archive serves
+   every client, so start with that one. Add a `plugin` archive to the same
+   distro, never a second distro, when the upload should show a name and a
+   description of its own: an uploaded `skills` archive is named after its
+   file and has no description.
 
    A `plugin` holds every shipped skill in one plugin, named after the distro
-   and described by a generated sentence; set `name` and `description` on its
-   layout when the defaults read badly. A marketplace keeps the source's
+   and described by a generated sentence that lists the included skills; set
+   `name` and `description` on its layout when the defaults read badly, which
+   the sentence does once it lists more than a few skills. A marketplace keeps the source's
    plugins unless its layout says `flatten: true`, which merges them into one
    plugin (`plugin-name`, `plugin-description`); use that for a `git` target
    whose recipient wants one plugin beside their own.
@@ -119,9 +122,9 @@ WhatsApp and the like, for " followed by where the archives are installed.
 
 | Archives of shape | The preset ends with |
 | --- | --- |
-| `skills` or `marketplace` only | `for Claude Code` |
+| `marketplace` only | `for Claude Code` |
 | `plugin` only | `for Claude Desktop and claude.ai` |
-| Both | `for Claude Code, Claude Desktop and claude.ai` |
+| `skills`, or several shapes | `for Claude Code, Claude Desktop and claude.ai` |
 
 A `git` or `agensi` target needs a named recipient; ask for it.
 
@@ -219,10 +222,16 @@ requires it, never by editing the lock, which `lock --check` would reject.
 
 ## Uploads
 
-Claude Desktop and claude.ai take plugins, not single skills: an archive of
-shape `plugin` is the file to upload there. It holds every shipped skill, so
-skills that read each other or their shared material keep working. After
-locking, read `uploads.unresolved` of that layout in the lock: a path listed
+Claude Desktop and claude.ai take plugins, not single skills, under *Plugins ›
+Add › Upload plugin*. Both a `plugin` and a `skills` archive upload there
+(seen 2026-11-24): for a `skills` archive the client writes the manifest and
+names the plugin after the zip file, without a description; a `plugin`
+archive brings its own name, description and README. Either holds every
+shipped skill, so skills that read each other or their shared material keep
+working. A skill that needs the user's machine, such as a forge CLI or a file
+under `~/.claude`, loads on claude.ai but finds neither there; say so when a
+distro of such skills is meant for claude.ai. After
+locking a `plugin` layout, read its `uploads.unresolved` in the lock: a path listed
 there leads to something that does not ship, and breaks once the plugin is
 installed. Ship its target or reword the path in the source.
 
@@ -236,12 +245,13 @@ installed. Ship its target or reword the path in the source.
 
   | File | The receiver |
   | --- | --- |
-  | `<distro>-skills.zip` | Copies the folders under `skills/` into `~/.claude/skills/`, or into a project's `.claude/skills/` |
+  | `<distro>-skills.zip` | Copies the folders under `skills/` into `~/.claude/skills/`, or into a project's `.claude/skills/`; for Claude Desktop or claude.ai, uploads the zip under *Plugins › Add › Upload plugin* |
   | `<distro>-plugin.zip` | Uploads it in Claude Desktop or claude.ai under *Plugins › Add › Upload plugin*; for Claude Code, unzips it into `~/.claude/skills/<plugin>/` |
   | `<distro>-marketplace.zip` | Unzips it to a folder that stays, adds that folder as a marketplace (`/plugin marketplace add <folder>`, or the Marketplaces tab of `/plugins` in VS Code) and installs the plugins. Claude Code loads a local marketplace in place, so moving or deleting the folder breaks them; it does not take the zip itself |
 
-  For a one-off hand-over, the first two cover every receiver: the skills zip
-  for Claude Code and VS Code, the plugin zip for Claude Desktop and claude.ai.
+  For a one-off hand-over, the skills zip alone covers every receiver. Tell a
+  receiver who uploads it not to rename the file, since the plugin takes its
+  name from it.
 - **Git targets, locally:** `deliver <name> --dry-run` first: it clones,
   applies, commits and runs the gate in a scratch clone and pushes nothing.
   Report what it would change. Run the real delivery only when asked. `deliver`

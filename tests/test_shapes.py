@@ -346,7 +346,7 @@ def test_shape_plugin_defaults_its_name_and_description(source):
     manifest = json.loads(files[".claude-plugin/plugin.json"])
     assert manifest["name"] == "acme"
     assert manifest["description"] == (
-        "The skill `invoice-export`, with the skills it requires."
+        "The skill invoice-export, with the skills it requires."
     )
 
 
@@ -408,7 +408,7 @@ def test_flatten_defaults_the_plugin_to_the_distro_name(source):
     files = build(source, INCLUDE, "{shape: marketplace, flatten: true}")
     assert "plugins/acme/skills/invoice-export/SKILL.md" in files
     manifest = json.loads(files["plugins/acme/.claude-plugin/plugin.json"])
-    assert manifest["description"].startswith("The skill `invoice-export`")
+    assert manifest["description"].startswith("The skill invoice-export")
 
 
 def test_flatten_refuses_two_skills_with_one_name(source):

@@ -187,7 +187,7 @@ def test_one_distro_locks_and_builds_several_layouts(source, capsys):
     assert "README.md" in names and "LICENSE" in names
     assert manifest["name"] == "acme"
     assert manifest["description"] == (
-        "The skill `invoice-export`, with the skills it requires."
+        "The skill invoice-export, with the skills it requires."
     )
     with zipfile.ZipFile(source / "dist/acme/acme-marketplace.zip") as zf:
         names = zf.namelist()

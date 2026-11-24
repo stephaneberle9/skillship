@@ -308,10 +308,17 @@ def test_paths_that_leave_the_delivery_are_refused(source, extra):
     ("shapes", "recipient"),
     [
         (
-            ["skills", "marketplace"],
+            ["marketplace"],
             (
                 "Early adopters, one-off hand-overs by email, Slack, WhatsApp and the "
                 "like, for Claude Code"
+            ),
+        ),
+        (
+            ["skills"],
+            (
+                "Early adopters, one-off hand-overs by email, Slack, WhatsApp and the "
+                "like, for Claude Code, Claude Desktop and claude.ai"
             ),
         ),
         (
