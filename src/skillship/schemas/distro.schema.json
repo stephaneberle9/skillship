@@ -4,10 +4,12 @@
   "title": "skillship distro profile (distro.yaml)",
   "type": "object",
   "additionalProperties": false,
-  "required": ["include"],
+  "required": [
+    "include"
+  ],
   "properties": {
     "recipient": {
-      "description": "Who receives this distro, for people reading the profile. Required unless every target is an `archive`, a `skill-upload` or a `plugin-upload`; such a profile defaults to early adopters who are handed the zip or upload it themselves.",
+      "description": "Who receives this distro, for people reading the profile. Required unless every target is an `archive`; such a profile defaults to early adopters who are handed the zip or upload it themselves.",
       "type": "string",
       "minLength": 1
     },
@@ -33,7 +35,7 @@
           "type": "boolean"
         },
         "readme": {
-          "description": "Generate a README listing the shipped skills; always on in a marketplace.",
+          "description": "Generate a README listing the shipped skills; always on where the layout holds plugins.",
           "type": "boolean"
         }
       }
@@ -48,98 +50,77 @@
         }
       }
     },
-    "layout": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "shape": {
-          "description": "`skills`: the skills side by side, without plugins. `marketplace`: the source's plugins that ship a skill, one or several, with a generated `marketplace.json`.",
-          "enum": ["skills", "marketplace"]
-        },
-        "root": {
-          "description": "Subdirectory inside the target that receives the tree: a relative path without `..`.",
-          "type": "string",
-          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
-        },
-        "merged-plugin": {
-          "description": "The one plugin of the marketplace that every shipped skill is merged into, whichever source plugin it comes from. Without it the marketplace keeps the source's plugins. Shape `marketplace` only.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["name"],
-          "properties": {
-            "name": {
-              "description": "Name of the merged plugin.",
-              "type": "string",
-              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
-            },
-            "description": {
-              "description": "Description of the merged plugin.",
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        },
-        "marketplace": {
-          "description": "Name of the generated marketplace, for shape `marketplace`. Defaults to the distro name.",
-          "type": "string",
-          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
-        }
-      },
-      "if": { "required": ["merged-plugin"] },
-      "then": { "properties": { "shape": { "const": "marketplace" } }, "required": ["shape"] }
-    },
     "license": {
       "description": "`inherit`, `none`, or an SPDX license identifier.",
       "type": "string",
       "minLength": 1
     },
-    "version": { "enum": ["keep", "bump-patch"] },
-    "auto": { "type": "boolean" },
-    "upload": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "inline-shared": {
-          "description": "For `skill-upload`: copy a plugin's `shared-material/` into each skill whose paths lead there, and point those paths at the copy.",
-          "type": "boolean"
-        }
-      }
+    "version": {
+      "enum": [
+        "keep",
+        "bump-patch"
+      ]
+    },
+    "auto": {
+      "type": "boolean"
     },
     "target-files": {
       "description": "Opt out of a target-file set of the source repo with `<set>: false`.",
       "type": "object",
-      "additionalProperties": { "type": "boolean" }
+      "additionalProperties": {
+        "type": "boolean"
+      }
     },
     "targets": {
       "type": "array",
-      "items": { "$ref": "#/$defs/target" }
+      "items": {
+        "$ref": "#/$defs/target"
+      }
     }
   },
   "$defs": {
     "patterns": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 },
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "uniqueItems": true
     },
     "target": {
       "type": "object",
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "properties": {
         "type": {
-          "enum": ["archive", "skill-upload", "plugin-upload", "agensi", "git"]
+          "enum": [
+            "archive",
+            "agensi",
+            "git"
+          ]
         }
       },
       "allOf": [
         {
-          "if": { "properties": { "type": { "const": "archive" } } },
+          "if": {
+            "properties": {
+              "type": {
+                "const": "archive"
+              }
+            }
+          },
           "then": {
             "additionalProperties": false,
             "properties": {
               "type": true,
               "name": {
-                "description": "File name of the zip, without `.zip`. Defaults to the distro name.",
+                "description": "File name of the zip, without `.zip`. Defaults to the distro name and the layout's shape, as in `acme-skills`.",
                 "type": "string",
                 "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*$"
+              },
+              "layout": {
+                "$ref": "#/$defs/layout"
               }
             }
           }
@@ -147,16 +128,11 @@
         {
           "if": {
             "properties": {
-              "type": { "enum": ["skill-upload", "plugin-upload"] }
+              "type": {
+                "const": "agensi"
+              }
             }
           },
-          "then": {
-            "additionalProperties": false,
-            "properties": { "type": true }
-          }
-        },
-        {
-          "if": { "properties": { "type": { "const": "agensi" } } },
           "then": {
             "additionalProperties": false,
             "properties": {
@@ -175,20 +151,97 @@
           }
         },
         {
-          "if": { "properties": { "type": { "const": "git" } } },
+          "if": {
+            "properties": {
+              "type": {
+                "const": "git"
+              }
+            }
+          },
           "then": {
             "additionalProperties": false,
-            "required": ["url"],
+            "required": [
+              "url"
+            ],
             "properties": {
               "type": true,
-              "url": { "type": "string", "minLength": 1 },
-              "branch": { "type": "string", "minLength": 1 },
-              "mode": { "enum": ["push", "pull-request", "merge-request"] },
-              "forge": { "enum": ["github", "gitlab"] }
+              "url": {
+                "type": "string",
+                "minLength": 1
+              },
+              "branch": {
+                "type": "string",
+                "minLength": 1
+              },
+              "mode": {
+                "enum": [
+                  "push",
+                  "pull-request",
+                  "merge-request"
+                ]
+              },
+              "forge": {
+                "enum": [
+                  "github",
+                  "gitlab"
+                ]
+              },
+              "layout": {
+                "$ref": "#/$defs/layout"
+              }
             }
           }
         }
       ]
+    },
+    "layout": {
+      "description": "How this target lays out the delivered tree. Defaults to shape `skills`.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shape": {
+          "description": "`skills`: the skills side by side, without plugins. `plugin`: one plugin holding every shipped skill, with `.claude-plugin/plugin.json` at its root, as Claude Desktop and claude.ai take it for an upload. `marketplace`: the source's plugins that ship a skill, one or several, with a generated `marketplace.json`.",
+          "enum": [
+            "skills",
+            "plugin",
+            "marketplace"
+          ]
+        },
+        "root": {
+          "description": "Subdirectory inside the target that receives the tree: a relative path without `..`.",
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
+        },
+        "name": {
+          "description": "Shape `plugin`: the plugin's name. Defaults to the distro name.",
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "description": {
+          "description": "Shape `plugin`: the plugin's description. Defaults to a sentence naming the included skills.",
+          "type": "string",
+          "minLength": 1
+        },
+        "marketplace": {
+          "description": "Shape `marketplace`: the name of the generated marketplace. Defaults to the distro name.",
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "flatten": {
+          "description": "Shape `marketplace`: merge every shipped skill into one plugin, whichever source plugin it comes from. Without it the marketplace keeps the source's plugins.",
+          "type": "boolean"
+        },
+        "plugin-name": {
+          "description": "With `flatten`: the name of that one plugin. Defaults to the distro name.",
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "plugin-description": {
+          "description": "With `flatten`: the description of that one plugin. Defaults to a sentence naming the included skills.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
     }
   }
 }

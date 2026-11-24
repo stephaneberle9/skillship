@@ -1,31 +1,22 @@
-"""The upload targets: `skill-upload`, `plugin-upload` and `agensi`.
+"""What is uploaded: an archive of shape `plugin`, and the `agensi` target.
 
-`skill-upload` writes one `<skill>.skill` per shipped skill, a zip whose only
-top-level entry is the skill's folder, for Claude Desktop and claude.ai
-(*Customize > Skills > Upload skill*). Those reject any frontmatter key but
-`ALLOWED_KEYS`, so the uploaded copy drops the others; the lock lists each drop.
-
-`plugin-upload` writes one zip per delivered plugin, with
-`.claude-plugin/plugin.json` at the top, for Claude Desktop's plugin upload. It
-needs shape `marketplace`. Its skills keep their frontmatter: plugins read the keys
-Claude Code reads.
+An archive of shape `plugin` is one plugin with `.claude-plugin/plugin.json` at
+the top, for the plugin upload of Claude Desktop and claude.ai. Its skills keep
+their frontmatter: plugins read the keys Claude Code reads.
 
 An upload is installed on its own, so a path that leaves it no longer
-resolves: `../other-skill/...` or `skills/other-skill/...` in a single skill,
-or a path into another plugin in a plugin zip. The lock lists every such path
-that resolves in the source. With `upload.inline-shared`, a skill that uses its
-plugin's `shared-material/` gets a copy of it inside its own folder, and those
-paths are rewritten to point there.
+resolves: a path out of the plugin, or out of a pack skill. The lock lists
+every such path that resolves in the source.
 
 `agensi` writes one Agensi skill pack per distro, for the Agensi marketplace: a
 `README.md` whose heading names the pack, `skills/<name>/` per skill, and the
 shipped `shared-material/` as `shared/`, with the paths into it rewritten to
 `../../shared/...`. A distro of one skill is a single skill instead, its files
-at the top, shared material in its own `shared/`. It needs shape `skills`, so
-the delivered text is flattened. A pack skill sees its own folder and `shared/`
-only, so paths to other skills are listed like those of `skill-upload`. The
-lock checks Agensi's limits for an upload from an agent; `preflight` mirrors
-its security scan.
+at the top, shared material in its own `shared/`. It is built from the `skills`
+layout, so the delivered text is flattened. A pack skill sees its own folder
+and `shared/` only, so paths to other skills are listed. The lock checks
+Agensi's limits for an upload from an agent; `preflight` mirrors its security
+scan.
 """
 
 from __future__ import annotations
@@ -42,10 +33,8 @@ from skillship.errors import SkillshipError
 from skillship.layout import Layout
 from skillship.source import _FRONTMATTER, SHARED_DIR, SourceRepo
 
-SKILL_UPLOAD = "skill-upload"
-PLUGIN_UPLOAD = "plugin-upload"
 AGENSI = "agensi"
-UPLOAD_TARGETS = (SKILL_UPLOAD, PLUGIN_UPLOAD, AGENSI)
+PLUGIN = "plugin"  # an archive of shape `plugin`, in the lock's `uploads`
 
 # The frontmatter keys claude.ai, Claude Desktop and the Skills API accept.
 ALLOWED_KEYS = (
@@ -56,7 +45,6 @@ DESCRIPTION_LIMIT = 1024
 AGENSI_KEYS = (
     *ALLOWED_KEYS, "summary", "version", "tags", "keywords", "use_cases", "docs_url",
 )  # fmt: skip
-SANITIZED = {SKILL_UPLOAD: ALLOWED_KEYS, AGENSI: AGENSI_KEYS}
 
 # Agensi's limits for an upload from an agent, the route the skillship skill takes.
 AGENSI_MAX_FILES = 100
@@ -97,7 +85,7 @@ class PathRef:
 
 @dataclass
 class Unresolved:
-    target: str  # skill-upload | plugin-upload
+    target: str  # plugin | agensi
     at: str
     path: str
 
@@ -106,18 +94,11 @@ class Unresolved:
 class Uploads:
     # target -> skill id -> keys
     dropped: dict[str, dict[str, list[str]]] = field(default_factory=dict)
-    inlined: list[str] = field(default_factory=list)  # skill ids
     unresolved: list[Unresolved] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def __bool__(self) -> bool:
-        return bool(self.dropped or self.inlined or self.unresolved)
-
-
-def kinds(profile_targets: list[dict[str, Any]]) -> list[str]:
-    """The upload target types a profile has, in a fixed order."""
-    present = {t["type"] for t in profile_targets}
-    return [k for k in UPLOAD_TARGETS if k in present]
+        return bool(self.dropped or self.unresolved)
 
 
 # -- frontmatter -------------------------------------------------------------
@@ -260,41 +241,27 @@ def shared_dir(repo: SourceRepo, sid: str) -> str:
 def analyze(
     repo: SourceRepo,
     layout: Layout,
-    targets: list[str],
+    agensi: bool,
     files: dict[str, list[str]],
     extras: list[str],
     texts: dict[str, str],
-    inline_shared: bool,
 ) -> Uploads:
-    """What the upload targets drop, inline and cannot resolve.
+    """What an upload of `layout` drops and cannot resolve.
 
-    `files` is the lock's skill id -> files, `texts` the delivered SKILL.md text
-    of each skill.
+    `agensi` says whether an `agensi` target uses the layout. `files` is the
+    lock's skill id -> files, `texts` the delivered SKILL.md text of each skill.
     """
     out = Uploads()
-    if PLUGIN_UPLOAD in targets and not layout.is_marketplace:
-        out.errors.append(
-            f"`{PLUGIN_UPLOAD}` needs shape `marketplace`, not `{layout.shape}`"
-        )
-    if AGENSI in targets and layout.shape != "skills":
-        out.errors.append(
-            f"`{AGENSI}` needs shape `skills`, not `{layout.shape}`: a pack holds "
-            "flat `skills/<name>/` folders"
-        )
+    plugin = layout.shape == PLUGIN
     skills = [sid for sid in files if not repo.skills[sid].is_shared]
     for sid in skills:
         meta = frontmatter(texts.get(sid, ""))
         out.errors += spec_errors(sid, meta)
-        for kind, allowed in SANITIZED.items():
-            dropped = [k for k in meta if k not in allowed]
-            if kind in targets and dropped:
-                out.dropped.setdefault(kind, {})[sid] = dropped
-    if AGENSI in targets:
+        dropped = [k for k in meta if k not in AGENSI_KEYS]
+        if agensi and dropped:
+            out.dropped.setdefault(AGENSI, {})[sid] = dropped
+    if agensi:
         out.errors += _agensi_limits(repo, files, len(skills))
-
-    def plugin_of(sid: str) -> str | None:
-        skill = repo.skills[sid]
-        return layout.plugin_name(skill.plugin or repo.home_plugin_name())
 
     shipped_dirs = {sid: repo.rel(repo.skills[sid].path) for sid in files}
     for sid in skills:
@@ -302,7 +269,6 @@ def analyze(
         plugin_dir = posixpath.dirname(posixpath.dirname(skill_dir))
         shared = shared_dir(repo, sid)
         shared_ships = any(shipped_dirs[s] == shared for s in files)
-        uses_shared = False
         for rel in files[sid]:
             if any(w in PurePosixPath(rel).parts[:-1] for w in _EXEMPLAR_WELLS):
                 continue
@@ -314,31 +280,18 @@ def analyze(
                 if not (repo.root / ref.target).exists():
                     continue  # an illustration, or a dead link the lock reports
                 at = f"{sid}/{rel}:{ref.line}"
-                if SKILL_UPLOAD in targets and not _inside(ref.target, skill_dir):
-                    if inline_shared and shared_ships and _inside(ref.target, shared):
-                        uses_shared = True
-                    else:
-                        out.unresolved.append(Unresolved(SKILL_UPLOAD, at, ref.path))
                 if (
-                    AGENSI in targets
+                    agensi
                     and not _inside(ref.target, skill_dir)
                     and not (shared_ships and _inside(ref.target, shared))
                 ):
                     out.unresolved.append(Unresolved(AGENSI, at, ref.path))
-                if PLUGIN_UPLOAD in targets and layout.is_marketplace:
-                    mine = plugin_of(sid)
-                    ok = any(
-                        _inside(ref.target, d) and plugin_of(s) == mine
-                        for s, d in shipped_dirs.items()
-                    ) or any(
-                        _inside(ref.target, e)
-                        for e in extras
-                        if _extra_plugin(repo, layout, e) == mine
-                    )
-                    if not ok:
-                        out.unresolved.append(Unresolved(PLUGIN_UPLOAD, at, ref.path))
-        if uses_shared:
-            out.inlined.append(sid)
+                # the one plugin holds every shipped skill and extra
+                if plugin and not (
+                    any(_inside(ref.target, d) for d in shipped_dirs.values())
+                    or any(_inside(ref.target, e) for e in extras)
+                ):
+                    out.unresolved.append(Unresolved(PLUGIN, at, ref.path))
     return out
 
 
@@ -381,13 +334,6 @@ def _agensi_limits(
     return out
 
 
-def _extra_plugin(repo: SourceRepo, layout: Layout, extra: str) -> str | None:
-    parts = extra.split("/")
-    if len(parts) > 2 and parts[0] == "plugins":
-        return layout.plugin_name(parts[1])
-    return None
-
-
 def _read(repo: SourceRepo, path: str) -> str | None:
     data = (repo.root / path).read_bytes()
     if b"\0" in data[:8192]:
@@ -401,52 +347,6 @@ def _read(repo: SourceRepo, path: str) -> str | None:
 # -- the archives ------------------------------------------------------------
 
 Contents = dict[str, tuple[bytes, int]]  # path in the zip -> (data, mode)
-
-
-def skill_archives(
-    repo: SourceRepo, layout: Layout, lock: dict[str, Any], delivered: Contents
-) -> dict[str, Contents]:
-    """Skill name -> the files of its `.skill`, under `<name>/`."""
-    uploads = lock.get("uploads", {})
-    inlined = set(uploads.get("inlined", []))
-    entries = {e["id"]: e for e in lock.get("skills", [])}
-    out: dict[str, Contents] = {}
-    for sid, entry in entries.items():
-        skill = repo.skills[sid]
-        if skill.is_shared:
-            continue
-        home = skill.plugin or repo.home_plugin_name()
-        skill_dir = repo.rel(skill.path)
-        plugin_dir = posixpath.dirname(posixpath.dirname(skill_dir))
-        shared = shared_dir(repo, sid)
-        files: Contents = {}
-        for rel in entry["files"]:
-            data, mode = delivered[layout.skill_file(home, skill.name, rel)]
-            if sid in inlined:
-                data = _relink(
-                    data,
-                    f"{skill_dir}/{rel}",
-                    skill_dir,
-                    plugin_dir,
-                    shared,
-                    f"{skill_dir}/{SHARED_DIR}",
-                )
-            if rel == "SKILL.md":
-                text, _ = sanitize(data.decode("utf-8"))
-                data = text.encode("utf-8")
-            files[f"{skill.name}/{rel}"] = (data, mode)
-        if sid in inlined:
-            shared_id = next(
-                s for s in entries if repo.rel(repo.skills[s].path) == shared
-            )
-            shared_home = repo.skills[shared_id].plugin or repo.home_plugin_name()
-            for rel in entries[shared_id]["files"]:
-                dest = layout.skill_file(shared_home, SHARED_DIR, rel)
-                files[f"{skill.name}/{SHARED_DIR}/{rel}"] = delivered[dest]
-        if skill.name in out:
-            raise SkillshipError(f"two shipped skills are named `{skill.name}`")
-        out[skill.name] = files
-    return out
 
 
 def _relink(
@@ -469,28 +369,6 @@ def _relink(
             path += "/"
         text = text[: ref.start] + path + text[ref.end :]
     return text.encode("utf-8")
-
-
-def plugin_archives(
-    layout: Layout, lock: dict[str, Any], delivered: Contents
-) -> dict[str, Contents]:
-    """Plugin name -> the files of its zip, with `.claude-plugin/plugin.json` at the top."""
-    out: dict[str, Contents] = {}
-    licenses = {
-        PurePosixPath(d).name: v
-        for d, v in delivered.items()
-        if PurePosixPath(d).parent == layout.root
-        and PurePosixPath(d).name.startswith("LICENSE")
-    }
-    for entry in lock.get("plugins", []):
-        prefix = (layout.root / "plugins" / entry["name"]).as_posix() + "/"
-        files = {
-            d[len(prefix) :]: v for d, v in delivered.items() if d.startswith(prefix)
-        }
-        for name, value in licenses.items():
-            files.setdefault(name, value)
-        out[entry["name"]] = files
-    return out
 
 
 def agensi_archive(

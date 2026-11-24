@@ -67,7 +67,7 @@ def drift_report(
         drifted = drift(clone, record)
         if not drifted:
             return []
-        built = base_delivery(repo, profile, record, forge, tmp / "base")
+        built = base_delivery(repo, profile, record, target, tmp / "base")
         base = (built[0], built[1].files) if built else None
         findings = []
         for d in drifted:

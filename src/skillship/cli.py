@@ -21,7 +21,7 @@ from skillship.build import BuildResult, build
 from skillship.deliver import deliver_git
 from skillship.drift import clear, drift_report
 from skillship.errors import NotImplementedYet, SkillshipError
-from skillship.resolve import Resolution, check, closure, resolve
+from skillship.resolve import Resolution, Variant, check, closure, resolve
 from skillship.source import SourceRepo
 
 NOT_IMPLEMENTED = 2
@@ -81,7 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
     deliver.add_argument(
         "--target",
         metavar="TYPE",
-        help="run the targets of this type only (archive, skill-upload, plugin-upload, agensi, git)",
+        help="run the targets of this type only (archive, agensi, git)",
     )
     deliver.add_argument(
         "--dry-run",
@@ -192,8 +192,7 @@ def _lock(repo: SourceRepo, args: argparse.Namespace) -> int:
 
 def _report(repo: SourceRepo, prof: profile.Profile, res: Resolution) -> None:
     files = sum(len(f) for f in res.files.values()) + len(res.extras)
-    generated = f", {len(res.generated)} generated" if res.generated else ""
-    print(f"{prof.name}: {len(res.skills)} skills, {files} files{generated}")
+    print(f"{prof.name}: {len(res.skills)} skills, {files} files")
     if res.suggested:
         print("  suggested by a shipped skill, not shipped:")
         for ref, by in sorted(res.suggested.items()):
@@ -216,20 +215,16 @@ def _report(repo: SourceRepo, prof: profile.Profile, res: Resolution) -> None:
         )
         print(f"      include: [{ref}]{_adds(repo, res, ref)}")
         print(f"      acknowledge: [{ref}]")
-    _report_uploads(res)
-    if res.rewritten:
-        print(
-            f"  rewritten: {sum(res.rewritten.values())} rewrites in "
-            f"{len(res.rewritten)} files (`--explain` lists them)"
-        )
-    plugins = sorted({u.plugin for u in res.blocking_unflattened})
-    for plugin in plugins:
+    for var in res.variants:
+        _report_variant(var)
+    # a mention flattening cannot rewrite, once, whichever layouts flatten
+    blocking = {(u.plugin, u.at) for v in res.variants for u in v.blocking_unflattened}
+    for plugin in sorted({p for p, _ in blocking}):
         print(
             f"  blocking: plugin `{plugin}` is named where flattening cannot rewrite it, at"
         )
-        for u in res.blocking_unflattened:
-            if u.plugin == plugin:
-                print(f"      {u.at}")
+        for _, at in sorted(b for b in blocking if b[0] == plugin):
+            print(f"      {at}")
         print(
             '    reword the mention in the source ("the `skill` skill (`plugin` plugin)" '
             "is flattened), or accept it as it is:"
@@ -237,49 +232,54 @@ def _report(repo: SourceRepo, prof: profile.Profile, res: Resolution) -> None:
         print(f"      acknowledge: [{plugin}]")
 
 
-def _report_uploads(res: Resolution) -> None:
-    up = res.uploads
+def _variant_title(var: Variant) -> str:
+    targets = f" ({', '.join(var.targets)})" if var.targets else ""
+    return f"{var.layout.label}{targets}"
+
+
+def _report_variant(var: Variant) -> None:
+    notes = []
+    if var.generated:
+        notes.append(f"{len(var.generated)} generated")
+    if var.rewritten:
+        notes.append(
+            f"{sum(var.rewritten.values())} rewrites in {len(var.rewritten)} files "
+            "(`--explain` lists them)"
+        )
+    print(f"  {_variant_title(var)}: {', '.join(notes) or 'delivered as it is'}")
+    up = var.uploads
     for kind, by_skill in up.dropped.items():
         keys = sorted({k for ks in by_skill.values() for k in ks})
         print(
-            f"  {kind} drops the frontmatter keys {', '.join(keys)} from "
+            f"    {kind} drops the frontmatter keys {', '.join(keys)} from "
             f"{len(by_skill)} skills"
         )
-    if up.inlined:
-        print(
-            f"  skill-upload copies shared-material into {', '.join(sorted(up.inlined))}"
-        )
-    for kind in ("skill-upload", "plugin-upload", "agensi"):
+    for kind, what in (
+        ("plugin", "the plugin"),
+        ("agensi", "their skill and `shared/`"),
+    ):
         found = [u for u in up.unresolved if u.target == kind]
         if not found:
             continue
-        what = {
-            "skill-upload": "its skill",
-            "plugin-upload": "its plugin",
-            "agensi": "its skill and `shared/`",
-        }[kind]
         print(
-            f"  {kind}: {len(found)} paths leave {what} and do not resolve once uploaded:"
+            f"    {kind}: {len(found)} paths leave {what} and do not resolve once uploaded:"
         )
         for u in found:
             print(f"      {u.at}: {u.path}")
-    if any(u.target == "skill-upload" for u in up.unresolved):
-        print(
-            "    plugin-upload keeps the tree together; `upload.inline-shared: true` "
-            "covers paths into shared-material"
-        )
 
 
 def _explain(prof: profile.Profile, res: Resolution) -> None:
-    if not res.rewrites:
-        print("  the delivered copy is not rewritten")
-    for path, rewrites in sorted(res.rewrites.items()):
-        for r in rewrites:
-            print(f"  {path}:{r.line}")
-            for line in r.before.split("\n"):
-                print(f"    - {line}")
-            for line in r.after.split("\n"):
-                print(f"    + {line}")
+    for var in res.variants:
+        print(f"  {_variant_title(var)}:")
+        if not var.rewrites:
+            print("    the delivered copy is not rewritten")
+        for path, rewrites in sorted(var.rewrites.items()):
+            for r in rewrites:
+                print(f"    {path}:{r.line}")
+                for line in r.before.split("\n"):
+                    print(f"      - {line}")
+                for line in r.after.split("\n"):
+                    print(f"      + {line}")
 
 
 def _adds(repo: SourceRepo, res: Resolution, ref: str) -> str:

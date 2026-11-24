@@ -144,7 +144,7 @@ def test_shape_skills_refuses_two_skills_with_one_name(source):
     other.mkdir(parents=True)
     (other / "SKILL.md").write_text(skill_md("tax-report"))
     _, res = resolved(source, "recipient: ACME\ninclude: [tax-report]\n")
-    assert res.errors == [
+    assert res.variants[0].errors == [
         "shape `skills` puts `ledger:tax-report`, `other:tax-report` into the same directory `skills/tax-report/`"
     ]
 
@@ -182,20 +182,37 @@ def test_root_skills_have_bare_ids(tmp_path):
             "include: []",
         ),  # the rest of the message differs between jsonschema versions
         (
-            "recipient: A\ninclude: [x]\nlayout: {shape: plugin}\n",
-            "shape `plugin` is now `marketplace` with `merged-plugin",
+            "recipient: A\ninclude: [x]\nlayout: {shape: skills}\n",
+            "`layout` now belongs to a target",
         ),
         (
-            "recipient: A\ninclude: [x]\nlayout: {shape: plugins}\n",
-            "shape `plugins` is now `marketplace`",
+            "recipient: A\ninclude: [x]\ntargets: [{type: skill-upload}]\n",
+            "the `skill-upload` target is gone",
         ),
         (
-            "recipient: A\ninclude: [x]\nlayout: {shape: marketplace, merged-plugin: {}}\n",
-            "'name' is a required property",
+            "recipient: A\ninclude: [x]\nupload: {inline-shared: true}\n",
+            "`upload.inline-shared` went away",
         ),
         (
-            "recipient: A\ninclude: [x]\nlayout: {merged-plugin: {name: m}}\n",
-            "'shape' is a required property",
+            (
+                "recipient: A\ninclude: [x]\n"
+                "targets: [{type: archive, layout: {merged-plugin: {name: m}}}]\n"
+            ),
+            "`merged-plugin` is now `flatten: true`",
+        ),
+        (
+            (
+                "recipient: A\ninclude: [x]\n"
+                "targets: [{type: agensi, layout: {shape: skills}}]\n"
+            ),
+            "Additional properties",
+        ),
+        (
+            (
+                "recipient: A\ninclude: [x]\n"
+                "targets: [{type: archive, layout: {shape: plugin, flatten: true}}]\n"
+            ),
+            "`flatten` does not apply to shape `plugin`",
         ),
         (
             "recipient: A\ninclude: [x]\ntargets: [{type: archive, url: u}]\n",
@@ -255,9 +272,9 @@ def test_a_tracked_symlink_is_refused(source):
 @pytest.mark.parametrize(
     "extra",
     [
-        "layout: {root: ../outside}\n",
-        "layout: {root: /abs}\n",
-        "layout: {root: a/../../b}\n",
+        "targets: [{type: archive, layout: {root: ../outside}}]\n",
+        "targets: [{type: archive, layout: {root: /abs}}]\n",
+        "targets: [{type: archive, layout: {root: a/../../b}}]\n",
         "targets: [{type: archive, name: ..}]\n",
     ],
 )
@@ -268,27 +285,35 @@ def test_paths_that_leave_the_delivery_are_refused(source, extra):
 
 
 @pytest.mark.parametrize(
-    ("types", "recipient"),
+    ("shapes", "recipient"),
     [
         (
-            ["archive"],
-            "Early adopters, one-off hand-overs by email, Slack, WhatsApp and the like",
-        ),
-        (
-            ["skill-upload", "plugin-upload"],
-            "Early adopters, one-off or repeated uploads into Claude Desktop and claude.ai",
-        ),
-        (
-            ["archive", "plugin-upload"],
+            ["skills", "marketplace"],
             (
                 "Early adopters, one-off hand-overs by email, Slack, WhatsApp and the "
-                "like, and one-off or repeated uploads into Claude Desktop and claude.ai"
+                "like, for Claude Code"
+            ),
+        ),
+        (
+            ["plugin"],
+            (
+                "Early adopters, one-off hand-overs by email, Slack, WhatsApp and the "
+                "like, for Claude Desktop and claude.ai"
+            ),
+        ),
+        (
+            ["skills", "plugin"],
+            (
+                "Early adopters, one-off hand-overs by email, Slack, WhatsApp and the "
+                "like, for Claude Code, Claude Desktop and claude.ai"
             ),
         ),
     ],
 )
-def test_a_profile_of_handover_targets_defaults_its_recipient(source, types, recipient):
-    targets = "targets:\n" + "".join(f"  - type: {t}\n" for t in types)
+def test_a_profile_of_archives_defaults_its_recipient(source, shapes, recipient):
+    targets = "targets:\n" + "".join(
+        f"  - {{type: archive, layout: {{shape: {s}}}}}\n" for s in shapes
+    )
     write_profile(source, "acme", "include: [ledger:tax-report]\n" + targets)
     assert profile.load(source, "acme").recipient == recipient
 
@@ -300,7 +325,7 @@ def test_a_profile_of_handover_targets_defaults_its_recipient(source, types, rec
         "targets:\n  - type: archive\n  - type: agensi\n",
     ],
 )
-def test_a_profile_without_recipient_needs_handover_targets_only(source, targets):
+def test_a_profile_without_recipient_needs_archive_targets_only(source, targets):
     write_profile(source, "acme", "include: [ledger:tax-report]\n" + targets)
     with pytest.raises(SkillshipError, match="`recipient` is required"):
         profile.load(source, "acme")

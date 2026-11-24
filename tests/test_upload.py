@@ -1,4 +1,4 @@
-"""The upload targets: `skill-upload` and `plugin-upload`."""
+"""What is uploaded: an archive of shape `plugin`, and the `agensi` target."""
 
 import zipfile
 
@@ -109,80 +109,22 @@ def test_sanitize_refuses_an_edit_that_changes_a_kept_key():
         sanitize("---\nname: x\nmodel: a\n# a comment\n  description: d\n---\n")
 
 
-# -- skill-upload ------------------------------------------------------------
+# -- an archive of shape plugin ----------------------------------------------
+
+PLUGIN = PROFILE + "targets: [{type: archive, layout: {shape: plugin}}]\n"
 
 
-def test_skill_upload_writes_one_sanitized_skill_per_skill(ledger, capsys):
-    status, data = lock(ledger, PROFILE + "targets: [{type: skill-upload}]\n")
+def test_a_plugin_archive_keeps_the_frontmatter_and_its_paths(ledger):
+    status, data = lock(ledger, PLUGIN)
     assert status == 0
-    assert data["uploads"]["dropped-keys"] == {
-        "skill-upload": {"ledger:ledger-close": ["user-invocable"]}
-    }
-    out = capsys.readouterr().out
-    assert "skill-upload drops the frontmatter keys user-invocable from 1 skills" in out
-
-    files = built(ledger, "skill-upload/ledger-close.skill")
-    assert "user-invocable" not in files["ledger-close/SKILL.md"][0]
-    assert "allowed-tools: Bash Read" in files["ledger-close/SKILL.md"][0]
-    assert "ledger-close/references/checklist.md" in files
-    assert all(n.startswith("ledger-close/") for n in files)
-    assert not any(n.endswith(".skillship.json") for n in files)
-    # one .skill per shipped skill, none for shared-material
-    names = sorted(p.name for p in (ledger / "dist/acme/skill-upload").iterdir())
-    assert names == [
-        "ledger-close.skill",
-        "ledger-knowledge.skill",
-        "ledger-rules.skill",
-    ]
-
-
-def test_skill_upload_reports_paths_that_leave_the_skill(ledger, capsys):
-    _, data = lock(ledger, PROFILE + "targets: [{type: skill-upload}]\n")
-    unresolved = {(u["at"], u["path"]) for u in data["uploads"]["unresolved"]}
-    assert unresolved == {
-        ("ledger:ledger-close/SKILL.md:15", "../shared-material/scripts/setup.sh"),
-        ("ledger:ledger-close/SKILL.md:16", "../ledger-rules/SKILL.md"),
-        ("ledger:ledger-close/SKILL.md:16", "skills/ledger-knowledge/SKILL.md"),
-        (
-            "ledger:ledger-close/references/checklist.md:3",
-            "../../shared-material/scripts/setup.sh",
-        ),
-    }
-    out = capsys.readouterr().out
-    assert (
-        "skill-upload: 4 paths leave its skill and do not resolve once uploaded:" in out
-    )
-    assert "upload.inline-shared: true" in out
-
-
-def test_inline_shared_copies_shared_material_into_the_skill(ledger):
-    _, data = lock(
-        ledger,
-        PROFILE + "upload: {inline-shared: true}\ntargets: [{type: skill-upload}]\n",
-    )
-    assert data["uploads"]["inlined"] == ["ledger:ledger-close"]
-    paths = {u["path"] for u in data["uploads"]["unresolved"]}
-    assert paths == {"../ledger-rules/SKILL.md", "skills/ledger-knowledge/SKILL.md"}
-
-    files = built(ledger, "skill-upload/ledger-close.skill")
-    setup, mode = files["ledger-close/shared-material/scripts/setup.sh"]
-    assert setup == "#!/bin/sh\necho setup\n" and mode & 0o777 == 0o755
-    assert "ledger-close/shared-material/README.md" in files
-    skill = files["ledger-close/SKILL.md"][0]
-    assert "`<skill-dir>/shared-material/scripts/setup.sh`" in skill
-    assert "(../ledger-rules/SKILL.md)" in skill  # not shared-material: left alone
-    checklist = files["ledger-close/references/checklist.md"][0]
-    assert "`../shared-material/scripts/setup.sh`" in checklist
-    assert "(../SKILL.md)" in checklist
-
-
-def test_a_skill_without_shared_paths_is_not_inlined(ledger):
-    _, data = lock(
-        ledger,
-        "recipient: ACME\ninclude: [ledger:tax-report]\nlicense: none\n"
-        "upload: {inline-shared: true}\ntargets: [{type: skill-upload}]\n",
-    )
-    assert "uploads" not in data
+    (layout,) = data["layouts"]
+    # nothing is dropped, and every path leads to a skill the plugin holds
+    assert "uploads" not in layout
+    files = built(ledger, "acme-plugin.zip")
+    assert ".claude-plugin/plugin.json" in files
+    assert "user-invocable: false" in files["skills/ledger-close/SKILL.md"][0]
+    assert files["skills/shared-material/scripts/setup.sh"][1] & 0o777 == 0o755
+    assert not any("marketplace.json" in n for n in files)
 
 
 def test_an_overlong_description_fails_the_lock_for_an_upload(source, capsys):
@@ -193,10 +135,7 @@ def test_an_overlong_description_fails_the_lock_for_an_upload(source, capsys):
             "plugins/ledger/skills/tax-report/SKILL.md": f"---\nname: tax-report\ndescription: {long}\n---\n"
         },
     )
-    status, _ = lock(
-        source,
-        "recipient: ACME\ninclude: [ledger:tax-report]\nlicense: none\ntargets: [{type: skill-upload}]\n",
-    )
+    status, _ = lock(source, PLUGIN.replace("ledger-close", "tax-report"))
     assert status == 1
     assert (
         "the description has 1025 characters; uploads take at most 1024"
@@ -204,71 +143,29 @@ def test_an_overlong_description_fails_the_lock_for_an_upload(source, capsys):
     )
 
 
-# -- plugin-upload -----------------------------------------------------------
-
-
-def test_plugin_upload_writes_one_zip_per_plugin(ledger, capsys):
-    status, data = lock(
-        ledger,
-        "recipient: ACME\ninclude: [billing:invoice-knowledge]\nlicense: inherit\n"
-        "layout: {shape: marketplace}\ntargets: [{type: plugin-upload}]\n",
-    )
-    assert status == 0
-    assert "uploads" not in data  # frontmatter kept, nothing leaves a plugin
-    files = built(ledger, "plugin-upload/billing.zip")
-    assert ".claude-plugin/plugin.json" in files
-    assert "skills/invoice-knowledge/SKILL.md" in files
-    assert files["LICENSE"][0] == "MIT License\n"
-    assert not any("marketplace.json" in n or ".skillship.json" in n for n in files)
-    assert (ledger / "dist/acme/plugin-upload/ledger.zip").is_file()
-
-
-def test_plugin_upload_reports_a_path_into_another_plugin(ledger):
+def test_an_overlong_description_is_fine_where_nothing_is_uploaded(source):
+    long = "x" * 1025
     commit(
-        ledger,
+        source,
         {
-            "plugins/billing/skills/invoice-knowledge/SKILL.md": skill_md(
-                "invoice-knowledge",
-                requires="ledger:ledger-knowledge",
-                body="See `../../../ledger/skills/ledger-rules/SKILL.md`.",
-            )
+            "plugins/ledger/skills/tax-report/SKILL.md": f"---\nname: tax-report\ndescription: {long}\n---\n"
         },
     )
-    _, data = lock(
-        ledger,
-        "recipient: ACME\ninclude: [billing:invoice-knowledge]\nlicense: none\n"
-        "layout: {shape: marketplace}\ntargets: [{type: plugin-upload}]\n",
-    )
-    assert data["uploads"]["unresolved"] == [
-        {
-            "target": "plugin-upload",
-            "at": "billing:invoice-knowledge/SKILL.md:11",
-            "path": "../../../ledger/skills/ledger-rules/SKILL.md",
-        }
-    ]
-
-
-def test_plugin_upload_needs_a_marketplace(source, capsys):
     status, _ = lock(
         source,
-        PROFILE.replace("ledger-close", "tax-report")
-        + "targets: [{type: plugin-upload}]\n",
+        PROFILE.replace("ledger-close", "tax-report") + "targets: [{type: archive}]\n",
     )
-    assert status == 1
-    assert (
-        "`plugin-upload` needs shape `marketplace`, not `skills`"
-        in capsys.readouterr().err
-    )
+    assert status == 0
 
 
-def test_deliver_builds_only_the_upload_targets_asked_for(ledger):
+def test_deliver_builds_only_the_targets_asked_for(ledger):
     write_profile(
-        ledger, "acme", PROFILE + "targets: [{type: archive}, {type: skill-upload}]\n"
+        ledger, "acme", PROFILE + "targets: [{type: archive}, {type: agensi}]\n"
     )
     assert main(["-C", str(ledger), "lock", "acme"]) == 0
-    assert main(["-C", str(ledger), "deliver", "acme", "--target", "skill-upload"]) == 0
-    assert (ledger / "dist/acme/skill-upload/ledger-close.skill").is_file()
-    assert not (ledger / "dist/acme/acme.zip").exists()
+    assert main(["-C", str(ledger), "deliver", "acme", "--target", "agensi"]) == 0
+    assert (ledger / "dist/acme/agensi/acme.zip").is_file()
+    assert not (ledger / "dist/acme/acme-skills.zip").exists()
 
 
 # -- agensi ------------------------------------------------------------------
@@ -279,10 +176,13 @@ AGENSI = PROFILE + "targets: [{type: agensi, title: Ledger Pack}]\n"
 def test_agensi_builds_a_pack_with_shared_files_and_a_preflight(ledger, capsys):
     status, data = lock(ledger, AGENSI)
     assert status == 0
-    assert data["uploads"]["dropped-keys"] == {
+    (layout,) = data["layouts"]
+    assert layout["layout"] == {"shape": "skills", "root": "."}
+    assert layout["targets"] == ["agensi/acme.zip"]
+    assert layout["uploads"]["dropped-keys"] == {
         "agensi": {"ledger:ledger-close": ["user-invocable"]}
     }
-    paths = {u["path"] for u in data["uploads"]["unresolved"]}
+    paths = {u["path"] for u in layout["uploads"]["unresolved"]}
     assert paths == {"../ledger-rules/SKILL.md", "skills/ledger-knowledge/SKILL.md"}
     capsys.readouterr()
 
@@ -314,14 +214,19 @@ def test_agensi_ships_a_lone_skill_as_a_single_skill(source):
     assert sorted(files) == ["LICENSE", "SKILL.md"]
 
 
-def test_agensi_needs_shape_skills(source, capsys):
-    status, _ = lock(
-        source,
-        "recipient: ACME\ninclude: [ledger:tax-report]\nlicense: none\n"
-        "layout: {shape: marketplace}\ntargets: [{type: agensi}]\n",
+def test_agensi_is_built_from_the_skills_layout_beside_other_layouts(ledger):
+    status, data = lock(
+        ledger,
+        PROFILE
+        + "targets:\n  - {type: archive, layout: {shape: marketplace}}\n"
+        + "  - {type: agensi}\n  - {type: archive}\n",
     )
-    assert status == 1
-    assert "`agensi` needs shape `skills`, not `marketplace`" in capsys.readouterr().err
+    assert status == 0
+    assert [(e["layout"]["shape"], e["targets"]) for e in data["layouts"]] == [
+        ("marketplace", ["acme-marketplace.zip"]),
+        ("skills", ["agensi/acme.zip", "acme-skills.zip"]),
+    ]
+    assert "skills/ledger-close/SKILL.md" in built(ledger, "agensi/acme.zip")
 
 
 def test_agensi_refuses_a_binary_file(source, capsys):

@@ -130,15 +130,20 @@ def distro(source: Path, target: Path) -> Path:
     return source
 
 
+LAYOUT = (
+    "    layout:\n      shape: marketplace\n      flatten: true\n"
+    "      plugin-name: acme-billing\n      plugin-description: ACME billing.\n"
+)
+
+
 def profile(target: Path, extra: str = "", forge: str = "github") -> str:
     return (
         "recipient: ACME\n"
         "include: [billing:invoice-draft]\n"
         "acknowledge: [ledger:ledger-audit]\n"
         "license: none\n"
-        "layout:\n  shape: marketplace\n  merged-plugin:\n    name: acme-billing\n    description: ACME billing.\n"
         f"targets:\n  - type: git\n    url: {target.as_uri()}\n    branch: main\n"
-        f"    forge: {forge}\n" + extra
+        f"    forge: {forge}\n" + LAYOUT + extra
     )
 
 
@@ -202,10 +207,7 @@ def test_opting_out_of_an_unknown_set_is_refused(distro: Path, target: Path, cap
 
 
 def test_no_target_files_without_a_marketplace(distro: Path, target: Path):
-    text = profile(target).replace(
-        "shape: marketplace\n  merged-plugin:\n    name: acme-billing\n    description: ACME billing.\n",
-        "shape: skills\n",
-    )
+    text = profile(target).replace(LAYOUT, "    layout: {shape: skills}\n")
     write_profile(distro, "acme", text)
     assert run(distro, "lock", "acme") == 0
     assert "target-files" not in (distro / "distros/acme/distro.lock.yaml").read_text()
@@ -273,6 +275,22 @@ def test_dry_run_pushes_nothing(distro: Path, target: Path, capsys):
     assert "would deliver to `main` (push)" in out
     assert KNOWLEDGE in out
     assert git(target, "rev-parse", "main") == before
+
+
+def test_each_target_gets_its_own_layout(distro: Path, target: Path, capsys):
+    import zipfile
+
+    write_profile(distro, "acme", profile(target, "  - {type: archive}\n"))
+    assert run(distro, "lock", "acme") == 0
+    commit(distro, "a second target")
+    assert run(distro, "deliver", "acme", "--dry-run", "--target", "git") == 0
+    assert KNOWLEDGE in capsys.readouterr().out  # the flattened marketplace
+    assert run(distro, "deliver", "acme", "--target", "archive") == 0
+    with zipfile.ZipFile(distro / "dist/acme/acme-skills.zip") as zf:
+        names = zf.namelist()
+    assert "skills/invoice-knowledge/SKILL.md" in names
+    # target files belong to the marketplace in the git target, not to the zip
+    assert not any(n.startswith(("checks/", ".github/", "plugins/")) for n in names)
 
 
 def test_a_failing_gate_stops_the_delivery(distro: Path, target: Path, capsys):
@@ -738,9 +756,10 @@ def test_a_record_naming_no_exact_ancestor_rebuilds_nothing(
     source = forged.format(sha=sha, short=sha[:12]).replace("source", repo.name())
     record_ = {"source": source if "@" in source else f"{repo.name()}@{source}"}
     prof = profile_mod.load(distro, "acme")
-    assert base_delivery(repo, prof, record_, "github", tmp_path / "base") is None
+    (git_target,) = prof.targets
+    assert base_delivery(repo, prof, record_, git_target, tmp_path / "base") is None
     assert base_delivery(
-        repo, prof, {"source": f"{repo.name()}@{sha}"}, "github", tmp_path / "ok"
+        repo, prof, {"source": f"{repo.name()}@{sha}"}, git_target, tmp_path / "ok"
     )
 
 

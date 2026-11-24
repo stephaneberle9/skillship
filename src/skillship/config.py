@@ -106,8 +106,8 @@ def target_file_sets(repo: SourceRepo, profile: Profile) -> list[TargetFileSet]:
                 f"{where}: `target-files: {{{name}: ...}}` names no set of "
                 f"{DISTROS_DIR}/{SETTINGS}"
             )
-    targets = git_targets(profile)
-    if profile.shape != "marketplace" or not targets:
+    targets = [t for t in git_targets(profile) if t["layout"].is_marketplace]
+    if not targets:
         return []
     forges = {forge_of(t) for t in targets}
     out = []

@@ -14,8 +14,8 @@
 #       secrets: inherit
 #
 # One job per distro runs `skillship deliver`, with the skillship version from
-# `distros/.skillship-version` (or the `skillship-version` input). Archive and
-# upload targets become a workflow artifact; git targets need credentials, read
+# `distros/.skillship-version` (or the `skillship-version` input). Archives and
+# Agensi packs become a workflow artifact; git targets need credentials, read
 # per distro, the distro's name upper-cased with `_` for `-` as KEY:
 #
 #   secrets  DISTRO_<KEY>_DEPLOY_TOKEN, DISTRO_<KEY>_SIGNING_KEY,

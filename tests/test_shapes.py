@@ -1,7 +1,8 @@
-"""The `plugins` and `plugin` layouts, the MCP extras, the README, and the rewrites."""
+"""The layouts, the MCP extras, the README, and the rewrites."""
 
 import json
 import zipfile
+from types import SimpleNamespace
 
 import pytest
 from conftest import git, skill_md, write_profile
@@ -16,18 +17,32 @@ from skillship.source import SourceRepo
 INCLUDE = "recipient: ACME\ninclude: [billing:invoice-export]\nlicense: none\n"
 
 
-def build(source, text):
-    write_profile(source, "acme", text + "targets: [{type: archive}]\n")
+def target(layout):
+    return f"targets: [{{type: archive, layout: {layout}}}]\n"
+
+
+def build(source, text, layout="{shape: skills}"):
+    """The files of the one archive a profile of `text` builds in `layout`."""
+    write_profile(source, "acme", text + target(layout))
     assert main(["-C", str(source), "lock", "acme"]) == 0
     assert main(["-C", str(source), "build", "acme"]) == 0
-    zf = zipfile.ZipFile(source / "dist/acme/acme.zip")
+    (archive,) = (source / "dist/acme").glob("*.zip")
+    zf = zipfile.ZipFile(archive)
     return {n: zf.read(n).decode() for n in zf.namelist()}
 
 
-def resolved(source, text):
-    write_profile(source, "acme", text)
+def resolved(source, text, layout="{shape: skills}"):
+    """What a profile of `text` resolves to in `layout`: the shared errors and that layout's."""
+    write_profile(source, "acme", text + target(layout))
     repo = SourceRepo(source)
-    return resolve(repo, profile.load(source, "acme"))
+    res = resolve(repo, profile.load(source, "acme"))
+    (var,) = res.variants
+    return SimpleNamespace(
+        errors=res.errors + var.errors,
+        plugins=var.plugins,
+        dead_links=var.dead_links,
+        uploads=var.uploads,
+    )
 
 
 # -- flattening --------------------------------------------------------------
@@ -86,6 +101,23 @@ def test_flattening_for_shape_skills(before, after):
     out = FLAT.rewrite(before)
     assert out.text == after
     assert out.unflattened == []
+
+
+def test_shape_skills_drops_the_plugin_from_a_pointer_to_its_own_file():
+    text = (
+        "See this plugin's `CONNECTORS.md`. This plugin's\n"
+        "[README](../../README.md) lists them. This plugin's skills stay.\n"
+    )
+    out = FLAT.rewrite(text)
+    assert out.text == (
+        "See the `CONNECTORS.md`. The\n"
+        "[README](../../README.md) lists them. This plugin's skills stay.\n"
+    )
+    assert out.count == 2
+    # with a merged plugin the skill is in a plugin, and the wording holds
+    merged = Rewriter(SKILLS_OF, SHIPPED, True, "acme")
+    assert merged.rewrite(text).text == text
+    assert Rewriter(SKILLS_OF, SHIPPED, False).rewrite(text).text == text
 
 
 def test_flattening_for_a_merged_marketplace_names_the_merged_plugin():
@@ -168,9 +200,7 @@ def test_other_mentions_of_a_source_plugin_are_unflattened():
 
 
 def test_shape_marketplace_delivers_the_source_plugins_with_trimmed_manifests(source):
-    files = build(
-        source, INCLUDE + "layout: {shape: marketplace, marketplace: acme-market}\n"
-    )
+    files = build(source, INCLUDE, "{shape: marketplace, marketplace: acme-market}")
     assert json.loads(files[".claude-plugin/marketplace.json"]) == {
         "name": "acme-market",
         "owner": {"name": "Fixture Owner"},
@@ -207,9 +237,7 @@ def test_shape_marketplace_delivers_the_source_plugins_with_trimmed_manifests(so
 
 
 def test_shape_marketplace_readme_lists_the_shipped_skills_only(source):
-    readme = build(source, INCLUDE + "layout: {shape: marketplace}\n")[
-        "plugins/billing/README.md"
-    ]
+    readme = build(source, INCLUDE, "{shape: marketplace}")["plugins/billing/README.md"]
     assert readme.startswith("# billing\n\nBilling skills.\n\n## Skills\n")
     assert (
         "| [`/invoice-export`](skills/invoice-export/SKILL.md) | The invoice-export skill. |"
@@ -226,9 +254,7 @@ def test_background_skills_get_their_own_table(source):
             "name: ledger-rules\n", "name: ledger-rules\nuser-invocable: false\n"
         )
     )
-    readme = build(source, INCLUDE + "layout: {shape: marketplace}\n")[
-        "plugins/ledger/README.md"
-    ]
+    readme = build(source, INCLUDE, "{shape: marketplace}")["plugins/ledger/README.md"]
     background = readme.split("## Background Skills")[1]
     assert "[`ledger-rules`](skills/ledger-rules/SKILL.md)" in background
     assert "/ledger-knowledge" in readme.split("## Background Skills")[0]
@@ -237,7 +263,8 @@ def test_background_skills_get_their_own_table(source):
 def test_inherit_keeps_the_manifest_license(source):
     files = build(
         source,
-        INCLUDE.replace("license: none\n", "") + "layout: {shape: marketplace}\n",
+        INCLUDE.replace("license: none\n", ""),
+        "{shape: marketplace}",
     )
     assert (
         json.loads(files["plugins/ledger/.claude-plugin/plugin.json"])["license"]
@@ -257,7 +284,7 @@ def test_a_dependency_on_an_unshipped_plugin_becomes_what_it_brings_along(source
     manifest = source / "plugins/billing/.claude-plugin/plugin.json"
     manifest.write_text(json.dumps({"name": "billing", "dependencies": ["bridge"]}))
     git(source, "add", "-A")
-    res = resolved(source, INCLUDE + "layout: {shape: marketplace}\n")
+    res = resolved(source, INCLUDE, "{shape: marketplace}")
     assert [(p.name, p.dependencies) for p in res.plugins] == [
         ("billing", ["ledger"]),
         ("ledger", []),
@@ -267,9 +294,7 @@ def test_a_dependency_on_an_unshipped_plugin_becomes_what_it_brings_along(source
 def test_shape_marketplace_needs_a_plugin_for_root_skills(tmp_path):
     (tmp_path / "skills/solo").mkdir(parents=True)
     (tmp_path / "skills/solo/SKILL.md").write_text(skill_md("solo"))
-    res = resolved(
-        tmp_path, "recipient: A\ninclude: [solo]\nlayout: {shape: marketplace}\n"
-    )
+    res = resolved(tmp_path, "recipient: A\ninclude: [solo]\n", "{shape: marketplace}")
     assert any(
         "root skills have no `.claude-plugin/plugin.json`" in e for e in res.errors
     )
@@ -277,9 +302,7 @@ def test_shape_marketplace_needs_a_plugin_for_root_skills(tmp_path):
     (tmp_path / ".claude-plugin/plugin.json").write_text(
         json.dumps({"name": "solo-plugin"})
     )
-    res = resolved(
-        tmp_path, "recipient: A\ninclude: [solo]\nlayout: {shape: marketplace}\n"
-    )
+    res = resolved(tmp_path, "recipient: A\ninclude: [solo]\n", "{shape: marketplace}")
     assert res.errors == []
     assert [p.name for p in res.plugins] == ["solo-plugin"]
 
@@ -288,21 +311,80 @@ def test_readme_false_is_refused_in_a_marketplace(source):
     write_profile(
         source,
         "acme",
-        INCLUDE + "layout: {shape: marketplace}\nplugin-extras: {readme: false}\n",
+        INCLUDE + "plugin-extras: {readme: false}\n" + target("{shape: marketplace}"),
     )
     with pytest.raises(SkillshipError, match="always generates a README"):
         resolve(SourceRepo(source), profile.load(source, "acme"))
 
 
-# -- merged-plugin -----------------------------------------------------------
+# -- shape plugin ------------------------------------------------------------
 
 
-def test_merged_plugin_merges_everything_into_one_flattened_plugin(source):
+def test_shape_plugin_is_one_flattened_plugin_at_the_root(source):
     files = build(
         source,
+        INCLUDE + "plugin-extras: {mcp: true}\n",
+        "{shape: plugin, name: acme-billing, description: Billing for ACME.}",
+    )
+    assert json.loads(files[".claude-plugin/plugin.json"]) == {
+        "name": "acme-billing",
+        "description": "Billing for ACME.",
+        "author": {"name": "Fixture Owner"},
+        "dependencies": ["outside@other-market"],
+    }
+    assert ".claude-plugin/marketplace.json" not in files
+    assert files["README.md"].startswith("# acme-billing\n\nBilling for ACME.\n")
+    assert "[`/invoice-export`](skills/invoice-export/SKILL.md)" in files["README.md"]
+    knowledge = files["skills/invoice-knowledge/SKILL.md"]
+    assert "`/acme-billing:ledger-knowledge`" in knowledge
+    assert "the `ledger-rules` skill (`acme-billing` plugin)" in knowledge
+    assert {".mcp.json", "CONNECTORS.md", "connectors/books.env"} <= set(files)
+
+
+def test_shape_plugin_defaults_its_name_and_description(source):
+    files = build(source, INCLUDE, "{shape: plugin}")
+    manifest = json.loads(files[".claude-plugin/plugin.json"])
+    assert manifest["name"] == "acme"
+    assert manifest["description"] == (
+        "The skill `invoice-export`, with the skills it requires."
+    )
+
+
+def test_shape_plugin_lists_a_path_that_leaves_the_plugin(source):
+    path = source / "plugins/billing/skills/invoice-export/notes.md"
+    path.write_text("Read `../../../ledger/skills/tax-report/SKILL.md` first.\n")
+    git(source, "add", "-A")
+    res = resolved(source, INCLUDE, "{shape: plugin}")
+    assert [(u.target, u.at, u.path) for u in res.uploads.unresolved] == [
+        (
+            "plugin",
+            "billing:invoice-export/notes.md:1",
+            "../../../ledger/skills/tax-report/SKILL.md",
+        )
+    ]
+
+
+def test_shape_plugin_is_not_a_git_layout_yet(source, capsys):
+    write_profile(
+        source,
+        "acme",
         INCLUDE
-        + "layout:\n  shape: marketplace\n"
-        + "  merged-plugin: {name: acme-skills, description: ACME's skills.}\n",
+        + "targets: [{type: git, url: https://example.invalid/r.git, "
+        + "layout: {shape: plugin}}]\n",
+    )
+    assert main(["-C", str(source), "lock", "acme"]) == 2
+    assert "shape `plugin` in a `git` target" in capsys.readouterr().err
+
+
+# -- a flattened marketplace -------------------------------------------------
+
+
+def test_flatten_merges_everything_into_one_flattened_plugin(source):
+    files = build(
+        source,
+        INCLUDE,
+        "{shape: marketplace, flatten: true, plugin-name: acme-skills, "
+        "plugin-description: ACME's skills.}",
     )
     assert json.loads(files["plugins/acme-skills/.claude-plugin/plugin.json"]) == {
         "name": "acme-skills",
@@ -322,18 +404,25 @@ def test_merged_plugin_merges_everything_into_one_flattened_plugin(source):
     assert "plugins/acme-skills/README.md" in files
 
 
-def test_merged_plugin_refuses_two_skills_with_one_name(source):
+def test_flatten_defaults_the_plugin_to_the_distro_name(source):
+    files = build(source, INCLUDE, "{shape: marketplace, flatten: true}")
+    assert "plugins/acme/skills/invoice-export/SKILL.md" in files
+    manifest = json.loads(files["plugins/acme/.claude-plugin/plugin.json"])
+    assert manifest["description"].startswith("The skill `invoice-export`")
+
+
+def test_flatten_refuses_two_skills_with_one_name(source):
     other = source / "plugins/other/skills/tax-report"
     other.mkdir(parents=True)
     (other / "SKILL.md").write_text(skill_md("tax-report"))
     res = resolved(
         source,
-        "recipient: A\ninclude: [tax-report]\n"
-        "layout: {shape: marketplace, merged-plugin: {name: m}}\n",
+        "recipient: A\ninclude: [tax-report]\n",
+        "{shape: marketplace, flatten: true, plugin-name: m}",
     )
     assert res.errors == [
         (
-            "`merged-plugin` puts `ledger:tax-report`, `other:tax-report` into the same "
+            "`flatten` puts `ledger:tax-report`, `other:tax-report` into the same "
             "directory `plugins/m/skills/tax-report/`"
         )
     ]
@@ -381,7 +470,7 @@ def test_a_link_into_a_skill_that_does_not_ship_suggests_including_it(source):
         "[audit](../../../ledger/skills/ledger-audit/SKILL.md)\n"
     )
     git(source, "add", "-A")
-    res = resolved(source, INCLUDE + "layout: {shape: marketplace}\n")
+    res = resolved(source, INCLUDE, "{shape: marketplace}")
     assert [(d.target, d.fix) for d in res.dead_links] == [
         (
             "../../../ledger/skills/ledger-audit/SKILL.md",
@@ -405,7 +494,7 @@ def test_links_in_templates_are_not_checked(source):
 
 def test_a_dead_link_fails_the_lock(source, capsys):
     link_from_ledger_knowledge(source, "[books](../../../CONNECTORS.md)\n")
-    write_profile(source, "acme", INCLUDE)
+    write_profile(source, "acme", INCLUDE + target("{shape: skills}"))
     assert main(["-C", str(source), "lock", "acme"]) == 1
     assert (
         "links.md:1: links `../../../CONNECTORS.md`, which the delivery "
@@ -418,7 +507,7 @@ def test_a_dead_link_fails_the_lock(source, capsys):
 
 def test_mcp_extras_ship_with_their_plugin(source):
     files = build(
-        source, INCLUDE + "layout: {shape: marketplace}\nplugin-extras: {mcp: true}\n"
+        source, INCLUDE + "plugin-extras: {mcp: true}\n", "{shape: marketplace}"
     )
     assert json.loads(files["plugins/ledger/.mcp.json"]) == {
         "mcpServers": {"books": {"command": "books-mcp"}}
@@ -440,9 +529,8 @@ def test_mcp_servers_of_merged_plugins_are_merged(source):
     git(source, "add", "-A")
     files = build(
         source,
-        INCLUDE
-        + "layout: {shape: marketplace, merged-plugin: {name: m}}\n"
-        + "plugin-extras: {mcp: true}\n",
+        INCLUDE + "plugin-extras: {mcp: true}\n",
+        "{shape: marketplace, flatten: true, plugin-name: m}",
     )
     assert list(json.loads(files["plugins/m/.mcp.json"])["mcpServers"]) == [
         "books",
@@ -529,7 +617,8 @@ def test_connectors_docs_stay_apart_in_a_marketplace(source):
     git(source, "add", "-A")
     files = build(
         source,
-        INCLUDE + "layout: {shape: marketplace}\nplugin-extras: {mcp: true}\n",
+        INCLUDE + "plugin-extras: {mcp: true}\n",
+        "{shape: marketplace}",
     )
     assert files["plugins/billing/CONNECTORS.md"] == BILLING_CONNECTORS
     assert "needs a token" in files["plugins/ledger/CONNECTORS.md"]
@@ -551,7 +640,11 @@ def test_a_lock_naming_a_plugin_outside_plugins_is_refused(name):
     from skillship.layout import Layout
 
     with pytest.raises(SkillshipError, match="not a directory name"):
-        Layout.from_lock({"layout": {"shape": "marketplace", "merged-plugin": name}})
+        Layout.from_lock(
+            {"layout": {"shape": "marketplace", "flatten": True, "plugin-name": name}}
+        )
+    with pytest.raises(SkillshipError, match="not a directory name"):
+        Layout.from_lock({"layout": {"shape": "plugin", "name": name}})
     with pytest.raises(SkillshipError, match="not a directory name"):
         Layout.from_lock({"layout": {"shape": "marketplace"}}).plugin_dir(name)
 

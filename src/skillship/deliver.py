@@ -101,12 +101,20 @@ class Outcome:
 
 
 def delivery(
-    repo: SourceRepo, profile: Profile, lock: dict[str, Any], forge: str | None
+    repo: SourceRepo, profile: Profile, lock: dict[str, Any], target: dict[str, Any]
 ) -> Delivery:
-    """The delivered files of the lock, with the target files for a target on `forge`."""
+    """What `target` receives: the delivered files in its layout, with its target files.
+
+    Target files go into a marketplace only, and those restricted to a forge
+    into a target on that forge.
+    """
+    forge = config.forge_of(target)
+    layout = target["layout"]
+    lock = lockfile.view(lock, layout)
     files = delivered(repo, profile, lock)
     gates = []
-    for name, spec in (lock.get("target-files") or {}).items():
+    sets = (lock.get("target-files") or {}) if layout.is_marketplace else {}
+    for name, spec in sets.items():
         for entry in spec.get("files", []):
             if entry.get("forge") and entry["forge"] != forge:
                 continue
@@ -141,7 +149,6 @@ def delivery(
             )
         if spec.get("gate"):
             gates.append((name, spec["gate"]))
-    layout = Layout.from_lock(lock)
     plugins = [p["name"] for p in lock.get("plugins", [])]
     return Delivery(files, layout, plugins, gates)
 
@@ -150,7 +157,7 @@ def base_delivery(
     repo: SourceRepo,
     profile: Profile,
     record: dict[str, Any],
-    forge: str | None,
+    target: dict[str, Any],
     where: Path,
 ) -> tuple[SourceRepo, Delivery] | None:
     """The source repo at the commit a record names, and the delivery it made; None when unknown.
@@ -179,9 +186,16 @@ def base_delivery(
         base_repo = SourceRepo(where)
         base_profile = profile_mod.load(where, profile.name)
         lock, _ = lockfile.load(where, profile.name)
-        return base_repo, delivery(base_repo, base_profile, lock, forge)
+        then = [
+            t
+            for t in config.git_targets(base_profile)
+            if t["url"] == target["url"] and t.get("branch") == target.get("branch")
+        ]
+        if not then:
+            return None  # the distro had no such target then
+        return base_repo, delivery(base_repo, base_profile, lock, then[0])
     except SkillshipError:
-        return None  # the commit lacks the distro, or holds a lock this version cannot read
+        return None  # the commit lacks the distro, or holds a profile or lock this version cannot read
 
 
 def remove_worktree(repo: SourceRepo, where: Path) -> None:
@@ -340,7 +354,7 @@ def _deliver_git(
             "delivery records a source commit that reproduces it"
         )
     source = f"{repo.name()}@{sha}"
-    new = delivery(repo, profile, lock, forge)
+    new = delivery(repo, profile, lock, target)
 
     tmp = Path(tempfile.mkdtemp(prefix="skillship-"))
     try:
@@ -364,7 +378,7 @@ def _deliver_git(
         # the last delivery as rebuilt from the source, never from the record alone:
         # anyone with write access to the target can edit `.skillship.json`, and a
         # forged entry must not make a signed delivery delete the recipient's files.
-        base = base_delivery(repo, profile, old, forge, tmp / "base") if old else None
+        base = base_delivery(repo, profile, old, target, tmp / "base") if old else None
         record = _apply(
             repo, sha, clone, profile, new, old, forge, out, base[1] if base else None
         )

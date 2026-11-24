@@ -1,6 +1,6 @@
 """Merge the `CONNECTORS.md` files of several source plugins into one.
 
-A flattening layout, the `skills` shape or a marketplace with `merged-plugin`,
+A flattening layout, the `skills` or `plugin` shape or a flattened marketplace,
 puts the files of every source plugin into one directory, so their
 `CONNECTORS.md` files land on one path. Like the `.mcp.json` files beside them
 they are merged, into a document that reads as one:

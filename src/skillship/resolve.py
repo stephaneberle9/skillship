@@ -6,12 +6,17 @@ ship is a dangling mention; it blocks the lock unless the skill is suggested
 by a shipped skill, the mention is phrased conditionally ("when installed"),
 or the profile acknowledges it.
 
+Which skills and files ship is the same for every target. What a target makes
+of them depends on its layout, so everything below is resolved once per
+distinct layout of the profile's targets, as a `Variant`.
+
 The delivered text is rewritten (see `rewrite`). In a flattening layout, the
-`skills` shape and a merged marketplace, that includes flattening, and a
-mention of a source plugin flattening cannot rewrite blocks the lock unless the
-profile acknowledges that plugin. Such a layout also puts the source plugins'
-MCP extras on one path: their `.mcp.json` and `CONNECTORS.md` files are merged,
-and any other two differing files there block the lock.
+`skills` and `plugin` shapes and a flattened marketplace, that includes
+flattening, and a mention of a source plugin flattening cannot rewrite blocks
+the lock unless the profile acknowledges that plugin. Such a layout also puts
+the source plugins' MCP extras on one path: their `.mcp.json` and
+`CONNECTORS.md` files are merged, and any other two differing files there block
+the lock.
 """
 
 from __future__ import annotations
@@ -80,6 +85,30 @@ class PluginEntry:
 
 
 @dataclass
+class Variant:
+    """What one layout makes of the shipped skills and files."""
+
+    layout: Layout
+    targets: list[str] = field(default_factory=list)  # the targets that use it
+    plugins: list[PluginEntry] = field(default_factory=list)
+    generated: list[str] = field(
+        default_factory=list
+    )  # delivered paths skillship writes itself
+    rewritten: dict[str, int] = field(
+        default_factory=dict
+    )  # repo path -> number of rewrites
+    rewrites: dict[str, list[Rewrite]] = field(default_factory=dict)
+    unflattened: list[Unflattened] = field(default_factory=list)
+    dead_links: list[DeadLink] = field(default_factory=list)
+    uploads: upload.Uploads = field(default_factory=upload.Uploads)
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def blocking_unflattened(self) -> list[Unflattened]:
+        return [u for u in self.unflattened if u.status == "blocking"]
+
+
+@dataclass
 class Resolution:
     skills: dict[str, str] = field(
         default_factory=dict
@@ -91,31 +120,17 @@ class Resolution:
     extras: list[str] = field(
         default_factory=list
     )  # non-skill files that ship, repo-relative: LICENSE, MCP extras
-    plugins: list[PluginEntry] = field(default_factory=list)
-    generated: list[str] = field(
-        default_factory=list
-    )  # delivered paths skillship writes itself
-    rewritten: dict[str, int] = field(
-        default_factory=dict
-    )  # repo path -> number of rewrites
-    rewrites: dict[str, list[Rewrite]] = field(default_factory=dict)
-    unflattened: list[Unflattened] = field(default_factory=list)
     suggested: dict[str, list[str]] = field(
         default_factory=dict
     )  # ref -> shipped skills suggesting it
     dangling: list[Dangling] = field(default_factory=list)
-    dead_links: list[DeadLink] = field(default_factory=list)
     target_files: list[config.TargetFileSet] = field(default_factory=list)
-    uploads: upload.Uploads = field(default_factory=upload.Uploads)
+    variants: list[Variant] = field(default_factory=list)  # one per distinct layout
     errors: list[str] = field(default_factory=list)
 
     @property
     def blocking(self) -> list[Dangling]:
         return [d for d in self.dangling if d.status == "blocking"]
-
-    @property
-    def blocking_unflattened(self) -> list[Unflattened]:
-        return [u for u in self.unflattened if u.status == "blocking"]
 
 
 def resolve(repo: SourceRepo, profile: Profile) -> Resolution:
@@ -145,19 +160,6 @@ def resolve(repo: SourceRepo, profile: Profile) -> Resolution:
             if sid in res.skills:
                 res.errors.append(f"`{sid}` is excluded, but ships: {_chain(res, sid)}")
 
-    layout = Layout(profile.shape, PurePosixPath(profile.root), profile.merged_plugin)
-    if layout.flattens:
-        by_name: dict[str, list[str]] = defaultdict(list)
-        for sid in res.skills:
-            by_name[repo.skills[sid].name].append(sid)
-        for name, ids in sorted(by_name.items()):
-            if len(ids) > 1:
-                where = layout.skill_file(None, name, "").rstrip("/") + "/"
-                res.errors.append(
-                    f"{layout.label} puts {', '.join(f'`{i}`' for i in sorted(ids))} "
-                    f"into the same directory `{where}`"
-                )
-
     for sid in res.skills:
         res.files[sid] = repo.files(repo.skills[sid], profile.file_excludes)
     if profile.license == "inherit":
@@ -170,18 +172,6 @@ def resolve(repo: SourceRepo, profile: Profile) -> Resolution:
     if profile.extras.get("mcp"):
         for plugin in sources:
             res.extras += repo.extras(plugin or None)
-    _check_extras(repo, layout, res)
-
-    if layout.is_marketplace:
-        if "" in sources and not repo.home_plugin_name():
-            res.errors.append(
-                "shape `marketplace` needs every shipped skill in a plugin, but the "
-                "root skills have no `.claude-plugin/plugin.json` naming one"
-            )
-        res.plugins = _plugins(repo, profile, layout, sources)
-    res.generated = list(
-        layout.generated([p.name for p in res.plugins], profile_mod.readme(profile))
-    )
     res.target_files = config.target_file_sets(repo, profile)
 
     for sid in res.skills:
@@ -189,18 +179,15 @@ def resolve(repo: SourceRepo, profile: Profile) -> Resolution:
             if ref not in res.skills:
                 res.suggested.setdefault(ref, []).append(sid)
 
-    texts = _rewrite(repo, profile, layout, res)
-    kinds = upload.kinds(profile.targets)
-    if kinds:
-        res.uploads = upload.analyze(
-            repo, layout, kinds, res.files, res.extras, texts, profile.inline_shared
-        )
-        res.errors += res.uploads.errors
-    res.dead_links = _dead_links(repo, layout, res)
+    for layout, targets in profile_mod.layouts(profile):
+        res.variants.append(_variant(repo, profile, layout, targets, sources, res))
     res.dangling = _dangling(repo, profile, res)
     acknowledged = {d.ref for d in res.dangling if d.status == "acknowledged"}
     acknowledged_plugins = {
-        u.plugin for u in res.unflattened if u.status == "acknowledged"
+        u.plugin
+        for v in res.variants
+        for u in v.unflattened
+        if u.status == "acknowledged"
     }
     for pattern in profile.acknowledge:
         if pattern in repo.plugin_names():
@@ -213,6 +200,66 @@ def resolve(repo: SourceRepo, profile: Profile) -> Resolution:
                 f"`acknowledge: {pattern}` matches no dangling mention -- remove it"
             )
     return res
+
+
+def _variant(
+    repo: SourceRepo,
+    profile: Profile,
+    layout: Layout,
+    targets: list[dict[str, Any]],
+    sources: list[str],
+    res: Resolution,
+) -> Variant:
+    """What `layout` makes of the skills and extras `res` ships."""
+    var = Variant(layout, [profile_mod.target_label(profile, t) for t in targets])
+    if layout.flattens:
+        by_name: dict[str, list[str]] = defaultdict(list)
+        for sid in res.skills:
+            by_name[repo.skills[sid].name].append(sid)
+        for name, ids in sorted(by_name.items()):
+            if len(ids) > 1:
+                where = layout.skill_file(None, name, "").rstrip("/") + "/"
+                var.errors.append(
+                    f"{layout.label} puts {', '.join(f'`{i}`' for i in sorted(ids))} "
+                    f"into the same directory `{where}`"
+                )
+    _check_extras(repo, layout, res.extras, var.errors)
+    if layout.is_marketplace and "" in sources and not repo.home_plugin_name():
+        var.errors.append(
+            "shape `marketplace` needs every shipped skill in a plugin, but the "
+            "root skills have no `.claude-plugin/plugin.json` naming one"
+        )
+    if layout.has_plugins:
+        var.plugins = _plugins(repo, layout, sources, res)
+    var.generated = list(
+        layout.generated(
+            [p.name for p in var.plugins], profile_mod.readme(profile, layout)
+        )
+    )
+    texts = _rewrite(repo, profile, layout, res, var)
+    agensi = any(t["type"] == upload.AGENSI for t in targets)
+    if agensi or layout.shape == "plugin":
+        var.uploads = upload.analyze(repo, layout, agensi, res.files, res.extras, texts)
+        var.errors += var.uploads.errors
+    var.dead_links = _dead_links(repo, layout, res, var)
+    return var
+
+
+def default_description(repo: SourceRepo, res: Resolution) -> str:
+    """The description of a merged plugin whose profile states none: the included skills."""
+    shipped = [s for s in res.skills if not repo.skills[s].is_shared]
+    included = sorted(
+        repo.skills[s].name for s in shipped if res.skills[s].startswith("include ")
+    )
+    names = " and ".join(
+        [", ".join(f"`{n}`" for n in included[:-1]), f"`{included[-1]}`"]
+        if len(included) > 1
+        else [f"`{n}`" for n in included]
+    )
+    noun = "skills" if len(included) > 1 else "skill"
+    them = "they require" if len(included) > 1 else "it requires"
+    tail = f", with the skills {them}" if len(shipped) > len(included) else ""
+    return f"The {noun} {names}{tail}."
 
 
 def closure(repo: SourceRepo, start: str) -> list[str]:
@@ -252,14 +299,16 @@ def extra_dest(repo: SourceRepo, layout: Layout, path: str) -> str:
     return layout.plugin_file(plugin or repo.home_plugin_name(), rel)
 
 
-def _check_extras(repo: SourceRepo, layout: Layout, res: Resolution) -> None:
+def _check_extras(
+    repo: SourceRepo, layout: Layout, extras: list[str], errors: list[str]
+) -> None:
     """Refuse two extras on one path, unless they agree or are `.mcp.json` files that merge."""
     by_dest: dict[str, list[str]] = defaultdict(list)
-    for path in res.extras:
+    for path in extras:
         try:
             by_dest[extra_dest(repo, layout, path)].append(path)
         except SkillshipError as exc:
-            res.errors.append(str(exc))
+            errors.append(str(exc))
             return
     for dest, paths in sorted(by_dest.items()):
         if len(paths) < 2:
@@ -272,13 +321,13 @@ def _check_extras(repo: SourceRepo, layout: Layout, res: Resolution) -> None:
                     layout.unflattened_hint,
                 )
             except SkillshipError as exc:
-                res.errors.append(str(exc))
+                errors.append(str(exc))
             continue
         if PurePosixPath(dest).name == connectors.FILE:
             continue  # merged into one file, see `connectors`
         contents = {(repo.root / p).read_bytes().replace(b"\r\n", b"\n") for p in paths}
         if len(contents) > 1:
-            res.errors.append(
+            errors.append(
                 f"{layout.label} puts {', '.join(f'`{p}`' for p in paths)} on the "
                 f"same path `{dest}` -- {layout.unflattened_hint}, "
                 "or `plugin-extras.mcp: false`"
@@ -335,7 +384,7 @@ def merge_mcp(
 
 
 def _plugins(
-    repo: SourceRepo, profile: Profile, layout: Layout, sources: list[str]
+    repo: SourceRepo, layout: Layout, sources: list[str], res: Resolution
 ) -> list[PluginEntry]:
     """The delivered plugins, with `dependencies` trimmed to the plugins that ship.
 
@@ -390,9 +439,8 @@ def _plugins(
         for dep in trimmed(n):
             if not split(dep)[1] and dep not in outside:
                 outside.append(dep)
-    return [
-        PluginEntry(layout.merged, plugin_names, outside, profile.merged_description)
-    ]
+    description = layout.description or default_description(repo, res)
+    return [PluginEntry(layout.merged, plugin_names, outside, description)]
 
 
 # -- rewriting --------------------------------------------------------------
@@ -448,7 +496,7 @@ def merged_docs(
 
 
 def _rewrite(
-    repo: SourceRepo, profile: Profile, layout: Layout, res: Resolution
+    repo: SourceRepo, profile: Profile, layout: Layout, res: Resolution, var: Variant
 ) -> dict[str, str]:
     """Count the rewrites; returns the delivered SKILL.md text of each skill."""
     rw = rewriter(repo, layout, list(res.skills))
@@ -466,11 +514,11 @@ def _rewrite(
         if skill:
             texts[skill] = out.text
         if out.count:
-            res.rewritten[path] = out.count
-            res.rewrites[path] = out.rewrites
+            var.rewritten[path] = out.count
+            var.rewrites[path] = out.rewrites
         for plugin, line in out.unflattened:
             status = "acknowledged" if plugin in acknowledged else "blocking"
-            res.unflattened.append(Unflattened(plugin, f"{label}:{line}", status))
+            var.unflattened.append(Unflattened(plugin, f"{label}:{line}", status))
     return texts
 
 
@@ -505,7 +553,9 @@ _LINK = re.compile(r"\[[^\]]{0,120}\]\(([^)\s]+)\)")
 _PLACEHOLDER = re.compile(r"[<>\[\]{}]|\.\.\.|…")
 
 
-def _dead_links(repo: SourceRepo, layout: Layout, res: Resolution) -> list[DeadLink]:
+def _dead_links(
+    repo: SourceRepo, layout: Layout, res: Resolution, var: Variant
+) -> list[DeadLink]:
     """Relative links of delivered Markdown that resolve in the source repo but not in the delivery.
 
     A link that already resolves to nothing in the source is the plugin checks'
@@ -526,7 +576,7 @@ def _dead_links(repo: SourceRepo, layout: Layout, res: Resolution) -> list[DeadL
             delivered[path] = extra_dest(repo, layout, path)
         except SkillshipError:
             pass  # reported by `_check_extras`
-    present = set(delivered.values()) | set(res.generated)
+    present = set(delivered.values()) | set(var.generated)
     dirs = {str(PurePosixPath(d).parent) for d in present}
     while True:  # every ancestor directory
         more = {str(PurePosixPath(d).parent) for d in dirs} - dirs
@@ -664,13 +714,23 @@ def check(res: Resolution) -> None:
     problems = list(res.errors)
     for d in res.blocking:
         problems.append(f"{d.at}: names `{d.ref}`, which does not ship")
-    for d in res.dead_links:
-        problems.append(
-            f"{d.at}: links `{d.target}`, which the delivery does not contain -- {d.fix}"
-        )
-    for u in res.blocking_unflattened:
-        problems.append(
-            f"{u.at}: names plugin `{u.plugin}`, which flattening cannot rewrite"
-        )
+    # a problem of a layout, once, with the targets it concerns when not all share it
+    found: dict[str, list[str]] = {}
+    for var in res.variants:
+        mine = list(var.errors)
+        for d in var.dead_links:
+            mine.append(
+                f"{d.at}: links `{d.target}`, which the delivery does not contain -- {d.fix}"
+            )
+        for u in var.blocking_unflattened:
+            mine.append(
+                f"{u.at}: names plugin `{u.plugin}`, which flattening cannot rewrite"
+            )
+        for problem in mine:
+            found.setdefault(problem, [])
+            found[problem] += [t for t in var.targets if t not in found[problem]]
+    for problem, targets in found.items():
+        some = len(res.variants) > 1 and targets
+        problems.append(problem + (f" (in {', '.join(targets)})" if some else ""))
     if problems:
         raise SkillshipError("cannot lock:\n" + "\n".join(f"  {p}" for p in problems))

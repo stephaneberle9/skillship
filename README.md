@@ -2,7 +2,8 @@
 
 Resolve, lock and deliver curated subsets ("distros") of
 [Agent Skills](https://agentskills.io), with their declared dependencies, as
-zips, skill uploads or commits to a recipient's skill or plugin repository.
+zips of skills, uploadable plugins, marketplaces or commits to a recipient's
+skill or plugin repository.
 
 It works on any repository of Agent Skills, including Claude Code plugin
 marketplaces, and the skills it delivers run in Claude Code, Claude Cowork and
@@ -19,7 +20,7 @@ any other Agent Skills–compatible agent.
   - [Declare what each skill requires](#declare-what-each-skill-requires)
   - [Describe a distro](#describe-a-distro)
   - [Lock, build and deliver](#lock-build-and-deliver)
-  - [Upload targets](#upload-targets)
+  - [Uploads](#uploads)
   - [Deliver into a git repository](#deliver-into-a-git-repository)
   - [Take recipient changes back](#take-recipient-changes-back)
   - [Deliver from CI](#deliver-from-ci)
@@ -60,7 +61,7 @@ uvx skillship --version
 ## Usage
 
 skillship reads from a **source repo**, the repository your skills are written
-in, and delivers to a **target**: an archive, an upload, or a recipient's
+in, and delivers to a **target**: an archive, an Agensi pack, or a recipient's
 repository. One recipient's selection is a **distro**.
 
 ### Declare what each skill requires
@@ -93,65 +94,85 @@ include:
   - billing:invoice-*
 exclude:
   - billing:invoice-internal-audit
-layout:
-  shape: skills
 targets:
   - type: archive
+    layout:
+      shape: skills
+  - type: archive
+    layout:
+      shape: plugin
   - type: git
     url: https://github.com/acme/agent-skills.git
     branch: main
     mode: pull-request
+    layout:
+      shape: marketplace
 ```
+
+What ships is stated once, for the whole distro. How it is laid out is stated
+per target, so one distro can go out in several forms at once: here as a zip of
+skills, as a plugin to upload, and as a marketplace in ACME's repository.
 
 `recipient` says who receives the distro, for people reading the profile. A
 profile may leave it out when nobody in particular is named and its targets
-only build files to pass on. The recipient then reads as "Early adopters",
-followed by how the files travel:
+are all archives. The recipient then reads as "Early adopters, one-off
+hand-overs by email, Slack, WhatsApp and the like", followed by where the
+archives are installed:
 
-| Targets | Default recipient |
+| Archive of shape | The default recipient ends with |
 | --- | --- |
-| `archive` | Early adopters, one-off hand-overs by email, Slack, WhatsApp and the like |
-| `skill-upload`, `plugin-upload` | Early adopters, one-off or repeated uploads into Claude Desktop and claude.ai |
+| `skills`, `marketplace` | for Claude Code |
+| `plugin` | for Claude Desktop and claude.ai |
 
-A profile with both kinds of target names both ways. A `git` or `agensi`
-target needs a named recipient.
+A profile with both kinds of archive ends with "for Claude Code, Claude Desktop
+and claude.ai". A `git` or `agensi` target needs a named recipient.
 
-The layout shape decides how the delivered tree looks:
+A target's `layout.shape` decides how its delivered tree looks. An `archive`
+target zips that tree as `<distro>-<shape>.zip`:
 
-| Shape | Delivered tree |
-| --- | --- |
-| `skills` | `skills/<skill>/`, every skill side by side, without plugins |
-| `marketplace` | A marketplace: `plugins/<plugin>/` per source plugin that ships a skill, one or several, each with a generated `plugin.json` and README, and a `.claude-plugin/marketplace.json` listing them |
+| Shape | Delivered tree | What the receiver does with the zip |
+| --- | --- | --- |
+| `skills` (the default) | `skills/<skill>/`, every skill side by side, without plugins | Copies the skill folders into `.claude/skills` |
+| `plugin` | One plugin holding every shipped skill: `.claude-plugin/plugin.json`, a README and `skills/<skill>/` | Uploads it as a plugin in Claude Desktop or claude.ai |
+| `marketplace` | A marketplace: `plugins/<plugin>/` per source plugin that ships a skill, one or several, each with a generated `plugin.json` and README, and a `.claude-plugin/marketplace.json` listing them | Unpacks it and adds the directory with `/plugin marketplace add <directory>` in Claude Code |
 
-A marketplace keeps the source's plugins. To deliver one plugin instead, name
-it under `layout.merged-plugin`: every shipped skill is merged into that plugin,
-`plugins/<name>/`, whichever source plugin it comes from.
+Two archives of the same shape would write the same file; give one of them a
+`name`, which replaces the whole file name.
+
+A `plugin` is named after the distro and described by a sentence naming the
+included skills. `name` and `description` on its layout say otherwise:
+
+```yaml
+layout:
+  shape: plugin
+  name: acme-billing
+  description: Billing skills for ACME.
+```
+
+A marketplace keeps the source's plugins. With `flatten: true` it holds one
+plugin instead: every shipped skill is merged into `plugins/<name>/`, whichever
+source plugin it comes from. That plugin is named and described like a
+`plugin`, with `plugin-name` and `plugin-description`:
 
 ```yaml
 layout:
   shape: marketplace
-  merged-plugin:
-    name: acme-billing
-    description: Billing skills for ACME.
+  flatten: true
+  plugin-name: acme-billing
+  plugin-description: Billing skills for ACME.
 ```
-
-The `archive` of a marketplace is a marketplace too: unpacked, it is added with
-`/plugin marketplace add <directory>`, and its plugins are installed from
-there. It is not a file to upload. The `plugin-upload` target packs the same
-plugin folders one zip each, for Claude Desktop's plugin upload.
 
 A generated `plugin.json` keeps the source plugin's fields except `repository`,
 `homepage` and component paths, and its `dependencies` name only plugins that
 ship, plus those of other marketplaces. `layout.root` puts the tree in a
 subdirectory, and `layout.marketplace` names the marketplace (default: the
-distro name).
+distro name). A `git` target takes the shapes `skills` and `marketplace`.
 
 `plugin-extras.mcp: true` delivers each shipping plugin's `.mcp.json`,
 `CONNECTORS.md` and `connectors/`. `plugin-extras.readme: true` adds a README
-listing the skills to the `skills` shape; a marketplace always generates one
-per plugin.
+listing the skills to the `skills` shape; a plugin always gets one.
 
-The `skills` shape and a marketplace with `merged-plugin` **flatten**: the
+The `skills` and `plugin` shapes and a marketplace with `flatten` **flatten**: the
 source plugins do not survive, so the extras of several source plugins land on
 one path. There they are merged:
 
@@ -172,7 +193,7 @@ one path. There they are merged:
 
 ```bash
 skillship lock acme        # resolve the profile into distros/acme/distro.lock.yaml
-skillship build acme       # write the staging tree and archives to dist/
+skillship build acme       # write the staging trees and archives to dist/
 skillship deliver acme     # run every target of the profile
 skillship drift acme       # report what the recipient changed since the last delivery
 ```
@@ -181,6 +202,10 @@ skillship drift acme       # report what the recipient changed since the last de
 reason for each, into a lock file you commit. `build` and `deliver` read the
 lock and nothing else, and `build` refuses a lock that no longer matches the
 profile and the source repo.
+
+The lock lists the skills and files once. What depends on a target's layout,
+such as the delivered plugins, the generated files and the rewrites, follows
+under `layouts`, once per distinct layout with the targets that use it.
 
 The lock lists file paths, not their content: editing the text of a delivered
 file leaves it unchanged, while adding, removing or renaming a file or a skill,
@@ -213,6 +238,9 @@ rewrites per file; `skillship lock --explain` prints each one:
   plugin)", "(`` `plugin` `` plugin, when installed)", "(`` `plugin` ``)",
   "…, `` `plugin` `` plugin)" and ", from the `` `plugin` `` plugin when
   installed". Only names of skills that ship are rewritten.
+- In the `skills` shape, where the delivery has no plugin at all, a pointer to
+  a file of the skill's own plugin loses the plugin: "this plugin's
+  `` `CONNECTORS.md` ``" becomes "the `` `CONNECTORS.md` ``".
 
 Any other mention of a source plugin in a flattened delivery blocks the lock,
 since rewriting it would mean guessing. Reword it in the source, or list the
@@ -225,40 +253,33 @@ the `include:` or `plugin-extras` entry that ships the target, or a rewording
 of the link in the source. Links in `templates/` and `examples/` are not
 checked.
 
-### Upload targets
+### Uploads
 
-Three targets produce files to upload, into `dist/<name>/<type>/`:
+Two things a distro builds are uploaded somewhere rather than copied or added:
 
-| Type | Writes | Upload it at |
+| Target | Writes | Upload it at |
 | --- | --- | --- |
-| `skill-upload` | One `<skill>.skill` per shipped skill, a zip holding the skill's folder | Claude Desktop or claude.ai: *Customize › Skills › Upload skill* |
-| `plugin-upload` | One `<plugin>.zip` per delivered plugin, with `.claude-plugin/plugin.json` at the top; needs shape `marketplace` | Claude Desktop's plugin upload |
-| `agensi` | One Agensi skill pack, `<name>.zip`, and its pre-flight report; needs shape `skills` | [Agensi](https://www.agensi.io), a marketplace for paid skills, through its MCP connector |
+| `archive` of shape `plugin` | `<distro>-plugin.zip`, one plugin with `.claude-plugin/plugin.json` at the top | Claude Desktop or claude.ai: *Plugins › Add › Upload plugin* |
+| `agensi` | One Agensi skill pack, `agensi/<name>.zip`, and its pre-flight report, built from the `skills` layout | [Agensi](https://www.agensi.io), a marketplace for paid skills, through its MCP connector |
 
-An uploaded skill's frontmatter may hold only `name`, `description`,
-`license`, `compatibility`, `metadata` and `allowed-tools`, so `skill-upload`
-drops every other key, such as `user-invocable`, from its copy; the lock lists
-each drop. A plugin zip keeps the frontmatter Claude Code reads. For either
-target, a description longer than 1024 characters, or `metadata` that does not
-map keys to strings, blocks the lock.
+A plugin keeps the frontmatter Claude Code reads. For either upload, a
+description longer than 1024 characters, or `metadata` that does not map keys
+to strings, blocks the lock.
 
 An upload is installed on its own, so a path that leaves it no longer
-resolves: `../other-skill/…` or `skills/other-skill/…` in a single skill, or a
-path into another plugin in a plugin zip. The lock lists each such path that
-resolves in the source under `uploads.unresolved`. `plugin-upload` keeps a
-plugin's skills together, so it suits a distro whose skills read each other.
-With `upload.inline-shared: true`, a skill whose paths lead into its plugin's
-`shared-material/` gets its own copy of that directory, and those paths are
-rewritten to point at the copy.
+resolves. The lock lists each such path that resolves in the source under
+`uploads.unresolved` of the layout concerned. A plugin holds every shipped
+skill, so it suits a distro whose skills read each other: only a path to
+something that does not ship is listed.
 
 An `agensi` package is a skill pack: a `README.md` whose heading names the
 pack (`title:` on the target, by default the distro name), a `skills/<name>/`
 folder per skill, and the shipped `shared-material/` as `shared/`, with the
 paths into it rewritten to `../../shared/…`. A distro of one skill becomes a
 single skill instead. A pack skill sees its own folder and `shared/` only, so
-paths to other skills are listed under `uploads.unresolved` as for
-`skill-upload`. Frontmatter keeps the upload keys plus the listing fields
-Agensi reads (`summary`, `version`, `tags`, `keywords`, `use_cases`,
+paths to other skills are listed under `uploads.unresolved`. Its frontmatter
+keeps `name`, `description`, `license`, `compatibility`, `metadata` and
+`allowed-tools` plus the listing fields Agensi reads (`summary`, `version`, `tags`, `keywords`, `use_cases`,
 `docs_url`). The lock enforces Agensi's limits for an upload from an agent:
 at most 100 files, 5 MB and 50 skills, text only, no executables and no bundled
 dependencies.
@@ -435,7 +456,7 @@ jobs:
 
 A run from the Actions tab delivers one distro or all; a push to `main`
 delivers the distros whose profile says `auto: true`. Each distro gets its own
-job. Archive and upload targets become a workflow artifact, and the output goes
+job. Archives and Agensi packs become a workflow artifact, and the output goes
 into the job summary.
 
 A `git` target needs credentials, which no CI runner has. `deliver` and
@@ -474,7 +495,7 @@ trusted like the workflow that runs it.
 
 This repository is also a Claude Code plugin marketplace. Its `skillship`
 plugin lets Claude drive the CLI: draft a distro from a sentence, walk through
-the dangling report of `lock`, explain a lock diff, choose an upload target,
+the dangling report of `lock`, explain a lock diff, choose each target's shape,
 set up delivery from CI step by step, go through recipient drift, and submit an
 Agensi pack.
 
@@ -493,7 +514,7 @@ See [plugins/skillship/README.md](plugins/skillship/README.md).
 | `skillship lock --all` | Does the same for every distro of the source repo |
 | `skillship lock … --check` | Fails when a lock is stale instead of rewriting it; meant for CI |
 | `skillship lock … --explain` | Prints every rewrite of the delivered copy as before/after lines |
-| `skillship build <name> [--out DIR]` | Builds the staging tree, archives and upload files from the lock into `DIR` (default `dist/`) |
+| `skillship build <name> [--out DIR]` | Builds a staging tree per layout, the archives and the Agensi pack from the lock into `DIR` (default `dist/`) |
 | `skillship deliver <name> [--target TYPE] [--dry-run]` | Runs the distro's targets, or those of one type; `--dry-run` pushes nothing and builds no archive |
 | `skillship deliver … --overwrite PATH` | Replaces a delivered file the recipient changed; repeatable |
 | `skillship drift <name> [--out DIR]` | Reports recipient-side changes to delivered files and writes merge-back patches to `DIR/<name>/drift/` |

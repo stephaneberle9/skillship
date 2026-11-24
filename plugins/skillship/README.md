@@ -38,8 +38,8 @@ passes through the conversation.
 - **Locking** — the dangling report, one entry at a time, with the profile edit
   or source rewording that fixes it
 - **Reviewing** — a lock diff, as what the recipient gains or loses
-- **Uploading** — `skill-upload` or `plugin-upload`, decided by the paths an
-  upload would break
+- **Shapes** — skills to copy, a plugin to upload or a marketplace to add,
+  per target, decided by how the receiver installs it
 - **CI delivery** — deploy token, delivery-only signing key, source-repo secrets
   and a dry run, step by step
 - **Drift** — the recipient's changes, patch by patch, merged back or discarded
@@ -50,7 +50,7 @@ passes through the conversation.
 
 | Skill | Description |
 | --- | --- |
-| `/skillship` | Drive skillship: draft a distro, lock it and walk through the dangling report, explain a lock diff, choose an upload target, set up CI delivery to a git target, go through recipient drift, and submit an Agensi pack. |
+| `/skillship` | Drive skillship: draft a distro, lock it and walk through the dangling report, explain a lock diff, choose each target's shape, set up CI delivery to a git target, go through recipient drift, and submit an Agensi pack. |
 
 ## Example Workflows
 

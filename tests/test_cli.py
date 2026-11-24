@@ -137,29 +137,98 @@ def test_explain_prints_each_rewrite_before_and_after(source, capsys):
     write_profile(source, "acme", PROFILE)
     assert run(source, "lock", "acme", "--explain") == 0
     out = capsys.readouterr().out
-    assert "rewritten: 5 rewrites in 2 files" in out
+    assert "shape `skills` (acme-skills.zip): 5 rewrites in 2 files" in out
     assert (
-        "  plugins/billing/skills/invoice-knowledge/SKILL.md:11\n"
-        "    - Post entries with `/ledger:ledger-knowledge`.\n"
-        "    + Post entries with `/ledger-knowledge`.\n"
+        "    plugins/billing/skills/invoice-knowledge/SKILL.md:11\n"
+        "      - Post entries with `/ledger:ledger-knowledge`.\n"
+        "      + Post entries with `/ledger-knowledge`.\n"
     ) in out
     assert (
-        "    - The rules live in the `ledger-rules` skill (`ledger` plugin).\n"
-        "    + The rules live in the `ledger-rules` skill.\n"
+        "      - The rules live in the `ledger-rules` skill (`ledger` plugin).\n"
+        "      + The rules live in the `ledger-rules` skill.\n"
     ) in out
 
 
 def test_shape_marketplace_only_prunes_suggests(source, capsys):
-    write_profile(source, "acme", PROFILE + "layout: {shape: marketplace}\n")
+    write_profile(source, "acme", PROFILE + "    layout: {shape: marketplace}\n")
     assert run(source, "lock", "acme", "--explain") == 0
     out = capsys.readouterr().out
-    assert "rewritten: 1 rewrites in 1 files" in out
+    assert "1 rewrites in 1 files" in out
     assert (
-        "  plugins/billing/skills/invoice-export/SKILL.md:8\n"
-        "    -   suggests: >-\n"
-        "    -     ledger:ledger-audit\n"
-        "    + \n"
+        "    plugins/billing/skills/invoice-export/SKILL.md:8\n"
+        "      -   suggests: >-\n"
+        "      -     ledger:ledger-audit\n"
+        "      + \n"
     ) in out
+
+
+def test_one_distro_locks_and_builds_several_layouts(source, capsys):
+    write_profile(
+        source,
+        "acme",
+        PROFILE
+        + "  - {type: archive, layout: {shape: plugin}}\n"
+        + "  - {type: archive, layout: {shape: marketplace}}\n",
+    )
+    assert run(source, "lock", "acme") == 0
+    text = lock_text(source)
+    assert text.count("- id: ") == 5  # the skills are listed once
+    assert (
+        "- layout:\n    shape: skills\n    root: .\n  targets:\n  - acme-skills.zip\n"
+        in text
+    )
+    assert "    shape: plugin\n    root: .\n    name: acme\n" in text
+    assert "    shape: marketplace\n    root: .\n    marketplace: acme\n" in text
+    assert run(source, "build", "acme") == 0
+    with zipfile.ZipFile(source / "dist/acme/acme-plugin.zip") as zf:
+        names = zf.namelist()
+        manifest = json.loads(zf.read(".claude-plugin/plugin.json"))
+    assert "skills/invoice-export/SKILL.md" in names
+    assert "README.md" in names and "LICENSE" in names
+    assert manifest["name"] == "acme"
+    assert manifest["description"] == (
+        "The skill `invoice-export`, with the skills it requires."
+    )
+    with zipfile.ZipFile(source / "dist/acme/acme-marketplace.zip") as zf:
+        names = zf.namelist()
+    assert ".claude-plugin/marketplace.json" in names
+    assert "plugins/billing/skills/invoice-export/SKILL.md" in names
+    for slug in ("skills", "plugin", "marketplace"):
+        assert (source / "dist/acme/staging" / slug / ".skillship.json").is_file()
+
+
+def test_two_archives_of_one_shape_need_a_name(source, capsys):
+    write_profile(source, "acme", PROFILE + "  - type: archive\n")
+    assert run(source, "lock", "acme") == 1
+    assert "writes `acme-skills.zip`, like targets/0" in capsys.readouterr().err
+
+
+def test_a_profile_of_an_earlier_release_is_told_what_to_change(source, capsys):
+    write_profile(
+        source,
+        "acme",
+        "recipient: ACME\ninclude: [billing:invoice-export]\n"
+        "layout: {shape: marketplace}\ntargets: [{type: plugin-upload}]\n",
+    )
+    assert run(source, "lock", "acme") == 1
+    err = capsys.readouterr().err
+    assert "`layout` now belongs to a target" in err
+    assert "`{type: archive, layout: {shape: plugin}}`" in err
+
+
+def test_plugin_keys_need_the_shape_they_belong_to(source, capsys):
+    write_profile(
+        source, "acme", PROFILE + "    layout: {shape: skills, name: acme-billing}\n"
+    )
+    assert run(source, "lock", "acme") == 1
+    assert "`name` does not apply to shape `skills`" in capsys.readouterr().err
+    write_profile(
+        source,
+        "acme",
+        PROFILE + "    layout: {shape: marketplace, plugin-name: acme-billing}\n",
+    )
+    assert run(source, "lock", "acme") == 1
+    assert "`plugin-name` needs `flatten: true`" in capsys.readouterr().err
 
 
 def test_an_unflattened_plugin_mention_blocks_until_acknowledged(source, capsys):
@@ -182,9 +251,9 @@ def test_an_unflattened_plugin_mention_blocks_until_acknowledged(source, capsys)
     write_profile(source, "acme", PROFILE + "acknowledge: [ledger]\n")
     assert run(source, "lock", "acme") == 0
     assert (
-        "unflattened:\n- plugin: ledger\n"
-        "  at: billing:invoice-export/references/notes.md:1\n"
-        "  status: acknowledged\n"
+        "  unflattened:\n  - plugin: ledger\n"
+        "    at: billing:invoice-export/references/notes.md:1\n"
+        "    status: acknowledged\n"
     ) in lock_text(source)
 
 
@@ -207,7 +276,7 @@ def built(source, profile_text=PROFILE):
     git(source, "-c", "user.name=T", "-c", "user.email=t@example.invalid",
         "-c", "commit.gpgsign=false", "commit", "-q", "-m", "distro")  # fmt: skip
     assert run(source, "build", "acme") == 0
-    return source / "dist/acme/acme.zip"
+    return source / "dist/acme/acme-skills.zip"
 
 
 def test_build_writes_a_zip_in_the_skills_shape(source):
@@ -235,24 +304,25 @@ def test_build_writes_a_zip_in_the_skills_shape(source):
     assert "dirty" not in record
     assert record["lock-digest"].startswith("sha256:")
     assert record["files"]["skills/invoice-export/SKILL.md"]["ownership"] == "owned"
-    assert (source / "dist/acme/staging/skills/invoice-export/SKILL.md").is_file()
+    staged = source / "dist/acme/staging/skills/skills/invoice-export/SKILL.md"
+    assert staged.is_file()
 
 
 def test_build_is_deterministic(source):
     first = built(source).read_bytes()
     assert run(source, "build", "acme") == 0
-    assert (source / "dist/acme/acme.zip").read_bytes() == first
+    assert (source / "dist/acme/acme-skills.zip").read_bytes() == first
 
 
 def test_build_honors_root_and_archive_name(source):
     profile_text = (
         "recipient: ACME\ninclude: [ledger:tax-report]\nlicense: none\n"
-        "layout: {root: vendor/acme}\ntargets: [{type: archive, name: acme-skills}]\n"
+        "targets: [{type: archive, name: for-acme, layout: {root: vendor/acme}}]\n"
     )
     write_profile(source, "acme", profile_text)
     run(source, "lock", "acme")
     assert run(source, "build", "acme") == 0
-    with zipfile.ZipFile(source / "dist/acme/acme-skills.zip") as zf:
+    with zipfile.ZipFile(source / "dist/acme/for-acme.zip") as zf:
         assert zf.namelist() == [
             ".skillship.json",
             "vendor/acme/skills/tax-report/SKILL.md",
@@ -266,7 +336,7 @@ def test_build_warns_about_a_dirty_tree(source, capsys):
     )
     assert run(source, "build", "acme") == 0
     assert "uncommitted changes" in capsys.readouterr().err
-    with zipfile.ZipFile(source / "dist/acme/acme.zip") as zf:
+    with zipfile.ZipFile(source / "dist/acme/acme-skills.zip") as zf:
         assert json.loads(zf.read(".skillship.json"))["dirty"] is True
 
 
@@ -293,7 +363,7 @@ def test_build_replaces_a_symlink_at_the_archive_path_instead_of_following_it(
 ):
     victim = tmp_path / "victim.txt"
     victim.write_text("keep me")
-    archive = source / "dist/acme/acme.zip"
+    archive = source / "dist/acme/acme-skills.zip"
     archive.parent.mkdir(parents=True)
     try:
         archive.symlink_to(victim)

@@ -1,17 +1,18 @@
-"""Build a distro from its lock: the staging tree, `.skillship.json` and the archives.
+"""Build a distro from its lock: the staging trees, `.skillship.json` and the archives.
 
-An `archive` target zips the whole tree; the upload targets (see `upload`)
-write one `.skill` per skill or one zip per plugin, from the same delivered
-files, under `<out>/<distro>/<target type>/`.
+Each distinct layout of the profile's targets gets its own tree under
+`<out>/<distro>/staging/<shape>/`. An `archive` target zips the tree of its
+layout as `<distro>-<shape>.zip`; an `agensi` target (see `upload`) writes its
+pack from the `skills` tree, under `<out>/<distro>/agensi/`.
 
 The zip is deterministic: entries sorted, one fixed timestamp, Unix permissions
 from git, and text files with LF line endings. Two builds of the same lock from
 the same source commit produce the same bytes.
 
 Besides the skills and extras the lock lists, build writes the files the lock
-lists under `generated`: in a marketplace a `plugin.json` and a README per
-delivered plugin and the `marketplace.json`, in the `skills` shape a README
-when the profile asks for one. Every delivered text file is rewritten as the
+lists under `generated`: a `plugin.json` and a README per delivered plugin, in a
+marketplace the `marketplace.json` too, in the `skills` shape a README when the
+profile asks for one. Every delivered text file is rewritten as the
 lock counts (see `rewrite`). Where a flattening layout puts several source
 plugins' `.mcp.json` or `CONNECTORS.md` on one path, build writes the merged
 file (see `connectors`).
@@ -31,7 +32,8 @@ from typing import Any
 
 import yaml
 
-from skillship import connectors, preflight, upload
+from skillship import connectors, lockfile, preflight, upload
+from skillship import profile as profile_mod
 from skillship.errors import NotImplementedYet, SkillshipError
 from skillship.layout import Layout, check_dest
 from skillship.profile import BUILD_TARGETS_IMPLEMENTED, Profile
@@ -96,86 +98,76 @@ def build(
         if kind not in BUILD_TARGETS_IMPLEMENTED + DELIVER_ONLY:
             raise NotImplementedYet(f"target type `{kind}` is not implemented yet")
 
-    contents = delivered(repo, profile, lock)
     sha, dirty = repo.head()
     source = f"{repo.name()}@{sha}" if sha else repo.name()
 
     base = out / profile.name
     staging = base / "staging"
-    for path in (out, base, staging, *(base / k for k in upload.UPLOAD_TARGETS)):
+    for path in (out, base, staging, base / upload.AGENSI):
         if path.is_symlink():
             raise SkillshipError(
                 f"{path} is a symlink; build writes only into a real directory"
             )
     if staging.exists():
         shutil.rmtree(staging)
-    record: dict[str, Any] = {
-        "distro": profile.name,
-        "source": source,
-        "lock-digest": lock_digest,
-        "files": {
-            dest: {
-                "ownership": f.ownership,
-                "sha256": hashlib.sha256(f.data).hexdigest(),
-            }
-            for dest, f in sorted(contents.items())
-        },
-    }
-    if dirty:
-        record["dirty"] = True
-    contents[RECORD] = DeliveredFile(
-        (json.dumps(record, indent=2, sort_keys=True) + "\n").encode(), 0o644, ""
-    )
 
-    for dest, f in contents.items():
-        path = staging / dest
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(f.data)
-
-    files = {d: (f.data, f.mode) for d, f in contents.items()}
     archives = []
     preflights = []
-    for target in profile.targets:
-        kind = target["type"]
-        if kind == "archive":
-            archive = base / f"{target.get('name', profile.name)}.zip"
-            _zip(archive, files)
-            archives.append(archive)
-        elif kind == upload.SKILL_UPLOAD:
-            layout = Layout.from_lock(lock)
-            for name, skill in sorted(
-                upload.skill_archives(repo, layout, lock, files).items()
-            ):
-                archive = base / kind / f"{name}.skill"
-                _zip(archive, skill)
+    for layout, targets in profile_mod.layouts(profile):
+        view = lockfile.view(lock, layout)
+        contents = delivered(repo, profile, view)
+        record: dict[str, Any] = {
+            "distro": profile.name,
+            "source": source,
+            "lock-digest": lock_digest,
+            "files": {
+                dest: {
+                    "ownership": f.ownership,
+                    "sha256": hashlib.sha256(f.data).hexdigest(),
+                }
+                for dest, f in sorted(contents.items())
+            },
+        }
+        if dirty:
+            record["dirty"] = True
+        contents[RECORD] = DeliveredFile(
+            (json.dumps(record, indent=2, sort_keys=True) + "\n").encode(), 0o644, ""
+        )
+
+        tree = staging / profile.slugs.get(layout, layout.shape)
+        for dest, f in contents.items():
+            path = tree / dest
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(f.data)
+
+        files = {d: (f.data, f.mode) for d, f in contents.items()}
+        for target in targets:
+            kind = target["type"]
+            if kind == "archive":
+                archive = base / f"{profile_mod.archive_name(profile, target)}.zip"
+                _zip(archive, files)
                 archives.append(archive)
-        elif kind == upload.PLUGIN_UPLOAD:
-            layout = Layout.from_lock(lock)
-            for name, plugin in sorted(
-                upload.plugin_archives(layout, lock, files).items()
-            ):
+            elif kind == upload.AGENSI:
+                name = target.get("name", profile.name)
+                title = target.get("title", profile.name)
+                package = upload.agensi_archive(repo, layout, view, files, title)
                 archive = base / kind / f"{name}.zip"
-                _zip(archive, plugin)
+                _zip(archive, package)
                 archives.append(archive)
-        elif kind == upload.AGENSI:
-            layout = Layout.from_lock(lock)
-            name = target.get("name", profile.name)
-            title = target.get("title", profile.name)
-            package = upload.agensi_archive(repo, layout, lock, files, title)
-            archive = base / kind / f"{name}.zip"
-            _zip(archive, package)
-            archives.append(archive)
-            report = preflight.scan(package)
-            path = base / kind / f"{name}.preflight.md"
-            _atomic(path, preflight.render(report, name).encode("utf-8"))
-            preflights.append((path, report))
+                report = preflight.scan(package)
+                path = base / kind / f"{name}.preflight.md"
+                _atomic(path, preflight.render(report, name).encode("utf-8"))
+                preflights.append((path, report))
     return BuildResult(staging, archives, source, dirty, preflights)
 
 
 def delivered(
     repo: SourceRepo, profile: Profile, lock: dict[str, Any]
 ) -> dict[str, DeliveredFile]:
-    """Delivered path -> content, for every file of the delivery but `.skillship.json`."""
+    """Delivered path -> content, for every file of the delivery but `.skillship.json`.
+
+    `lock` is the lock as one layout sees it (`lockfile.view`).
+    """
     layout = Layout.from_lock(lock)
     shipped = [entry["id"] for entry in lock.get("skills", [])]
     rw = rewriter(repo, layout, shipped)
@@ -307,11 +299,12 @@ def _manifest(
         if entry.get("description"):
             out["description"] = entry["description"]
         authors = [m.get("author") for m in manifests]
-        if authors[0] and all(a == authors[0] for a in authors):
+        if authors and authors[0] and all(a == authors[0] for a in authors):
             out["author"] = authors[0]
     licenses = [m.get("license") for m in manifests]
     if (
         profile.license == "inherit"
+        and licenses
         and licenses[0]
         and all(lic == licenses[0] for lic in licenses)
     ):

@@ -8,18 +8,22 @@ entries that ship. An entry naming a skill the recipient does not get points
 at nothing in the delivered tree, and the plugin checks fail it as `REQUIRE`.
 The lock's `suggested` section still records what was suggested.
 
-**Flattening, shape `skills` and a merged marketplace.** In the `skills` shape
-no plugin exists, and in a marketplace with `merged-plugin` only the merged one
-does, so a plugin-qualified name would name a plugin the recipient never gets.
+**Flattening, shape `skills` and a merged plugin.** In the `skills` shape
+no plugin exists, and in the `plugin` shape or a marketplace with `flatten`
+only the merged one does, so a plugin-qualified name would name a plugin the recipient never gets.
 Only where the named plugin is one of the source repo's and the named skill
 ships:
 
 - the call form `/plugin:skill` becomes `/skill` (shape `skills`) or
-  `/merged:skill` (merged marketplace), and likewise without the slash; inside a
+  `/merged:skill` (merged plugin), and likewise without the slash; inside a
   SKILL.md frontmatter, as in `metadata.requires`, the qualifier is dropped;
 - the attribution "the `skill` skill (`plugin` plugin)", or "…, `plugin`
-  plugin)", loses the plugin (shape `skills`) or names the merged plugin
-  (merged marketplace).
+  plugin)", loses the plugin (shape `skills`) or names the merged plugin.
+
+In the `skills` shape, where no plugin exists at all, a pointer to a file of
+the skill's own plugin loses the plugin too: "this plugin's `CONNECTORS.md`"
+becomes "the `CONNECTORS.md`". With a merged plugin it stays, since the skill
+is in a plugin there.
 
 Every other mention of a source plugin that ships skills matches no pattern and
 is reported as unflattened, because a guess could change what the text means.
@@ -44,6 +48,8 @@ _SUGGESTS = re.compile(
 _BLOCK_SCALAR = re.compile(r"[>|][+-]?")
 _COND = r"(?:,\s*(?:when|if)\s+installed)?"  # "(`plugin` plugin, when installed)"
 _ATTRIBUTIONS = ("pp", "cp", "fp")
+# "this plugin's `file`" or "this plugin's [file](…)": a file of the skill's own plugin
+_OWN = re.compile(r"\b(?P<t>[Tt])his\s+plugin's(?=\s+[`\[])")
 
 
 class _Verdict:
@@ -137,6 +143,10 @@ class Rewriter:
                 continue
             edits.append((m.start(), m.end(), str(new)))
             count += 1
+        if self.flattening and self.merged is None:  # shape `skills`: no plugin at all
+            for m in _OWN.finditer(text):
+                edits.append((m.start(), m.end(), m.group("t") + "he"))
+                count += 1
         edits.sort()
         return Rewritten(
             _apply(text, edits), count, _rewrites(text, edits), unflattened

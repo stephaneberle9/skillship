@@ -2,10 +2,11 @@
 name: skillship
 description: >-
   Drive skillship, the CLI that resolves, locks and delivers curated subsets ("distros") of a
-  repository's Agent Skills to a recipient as zips, skill or plugin uploads, an Agensi pack, or
-  commits to the recipient's repository. Drafts a distro profile from a one-sentence request,
-  runs `lock` and walks through the dangling report with the profile edit for each entry,
-  explains a lock diff, picks between `skill-upload` and `plugin-upload`, sets up delivery from
+  repository's Agent Skills to a recipient as zips of skills, an uploadable plugin, a
+  marketplace, an Agensi pack, or commits to the recipient's repository. Drafts a distro profile
+  from a one-sentence request, runs `lock` and walks through the dangling report with the
+  profile edit for each entry, explains a lock diff, picks the shape of each target by how the
+  receiver installs it, sets up delivery from
   GitHub Actions to a git target step by step (deploy token, a delivery-only signing key, the
   source repo's secrets, a dry run), goes through recipient drift patch by patch, and submits
   an Agensi pack through Agensi's MCP connector after you confirm the preview. Use when
@@ -70,38 +71,59 @@ repo":
 2. **Include.** Top-level families only, as `plugin:glob` or a bare glob; the
    closure brings the rest. Show the user which skills match before writing the
    glob.
-3. **Shape** (`layout.shape`):
+3. **Targets, each with its shape.** What ships is stated once; every target
+   says under `layout.shape` how it lays the delivery out, so one distro can go
+   out in several forms. Pick the shape by how the receiver installs it:
 
-   | The recipient wants | Shape |
+   | The receiver | Target |
    | --- | --- |
-   | Skills to drop into `.claude/skills`, or a flat zip | `skills` |
-   | The source's plugins, one or several, installable as a marketplace (its archive is a marketplace to add, not a file to upload) | `marketplace` |
-   | One plugin of their own, whichever source plugins the skills come from | `marketplace`, with `layout.merged-plugin: {name, description}` |
+   | Copies skills into `.claude/skills` (Claude Code, VS Code) | `archive`, shape `skills` (the default) |
+   | Uploads a plugin in Claude Desktop or claude.ai | `archive`, shape `plugin` |
+   | Adds a marketplace in Claude Code, keeping the source's plugins apart | `archive`, shape `marketplace` |
+   | Gets commits into a repository of their own | `git`, shape `skills` or `marketplace`, with `url`, `branch` and `mode` (`push`, `pull-request` on GitHub, `merge-request` on GitLab) |
+   | Buys it on Agensi | `agensi` |
 
-   `skills` and a marketplace with `merged-plugin` flatten: the source plugins
+   An archive is named `<distro>-<shape>.zip`. When the receivers use both
+   Claude Code and Claude Desktop, add both archives to the one distro rather
+   than writing a second distro.
+
+   A `plugin` holds every shipped skill in one plugin, named after the distro
+   and described by a generated sentence; set `name` and `description` on its
+   layout when the defaults read badly. A marketplace keeps the source's
+   plugins unless its layout says `flatten: true`, which merges them into one
+   plugin (`plugin-name`, `plugin-description`); use that for a `git` target
+   whose recipient wants one plugin beside their own.
+
+   `skills`, `plugin` and a flattened marketplace flatten: the source plugins
    do not survive, and their `.mcp.json` and `CONNECTORS.md` files are merged
-   into one each. Read the merged `CONNECTORS.md` in `dist/<name>/staging/`
-   after the first build; where it reads badly, the fix is a rewording in the
-   source files, not in the delivery.
+   into one each. Read the merged `CONNECTORS.md` in
+   `dist/<name>/staging/<shape>/` after the first build; where it reads badly,
+   the fix is a rewording in the source files, not in the delivery.
 
-4. **Targets.** `archive` for a hand-over; uploads per *Choosing an upload
-   target*; `git` with `url`, `branch` and `mode` (`push`, `pull-request` on
-   GitHub, `merge-request` on GitLab). Default to the reviewed modes for a
-   customer's repository: `push` writes straight to their branch.
-5. **License.** `inherit` ships the source repo's `LICENSE`; `none` leaves the
+   For a customer's repository, default to the reviewed modes: `push` writes
+   straight to their branch.
+4. **License.** `inherit` ships the source repo's `LICENSE`; `none` leaves the
    content under the recipient's license. Ask; never guess for a paying
    recipient. An SPDX id is part of the profile format but not implemented yet;
    the lock refuses it.
-6. **Extras.** `plugin-extras.mcp: true` when a shipped skill drives an MCP
+5. **Extras.** `plugin-extras.mcp: true` when a shipped skill drives an MCP
    server of its plugin or links its `CONNECTORS.md`; the lock's dead-link check
    says so if it is missed.
 
 Write `distros/<name>/distro.yaml` with a comment naming the purpose and a
-`recipient:` line, then lock it. A profile whose targets are all `archive`,
-`skill-upload` or `plugin-upload` may leave `recipient` out when nobody in
-particular is named: it then stands for early adopters who are handed the zip
-or upload the files themselves. A `git` or `agensi` target needs a named
-recipient.
+`recipient:` line, then lock it. Always write the line out, also when nobody in
+particular is named: a line to edit is easier to get right than one to invent.
+For a profile whose targets are all archives, preset it with the text skillship
+itself falls back to: "Early adopters, one-off hand-overs by email, Slack,
+WhatsApp and the like, for " followed by where the archives are installed.
+
+| Archives of shape | The preset ends with |
+| --- | --- |
+| `skills` or `marketplace` only | `for Claude Code` |
+| `plugin` only | `for Claude Desktop and claude.ai` |
+| Both | `for Claude Code, Claude Desktop and claude.ai` |
+
+A `git` or `agensi` target needs a named recipient; ask for it.
 
 ## Locking and the dangling report
 
@@ -121,7 +143,8 @@ apply a batch blind:
     `conditional`, and fixes every distro at once);
   - `exclude:` only to keep a skill out that an `include` glob matches. An
     excluded skill that something requires fails the lock, which is the point.
-- **Unflattened plugin mention** (shape `skills`, or `merged-plugin`) — prose names a
+- **Unflattened plugin mention** (any flattening layout: `skills`, `plugin`, a
+  marketplace with `flatten`) — prose names a
   source plugin in a phrasing flattening does not rewrite. Reword the source
   into an attribution phrasing the README lists, or acknowledge the plugin name
   when the mention is about the plugin as such (a pointer to its
@@ -129,13 +152,17 @@ apply a batch blind:
 - **Dead link** — a relative link that resolves in the source but not in the
   delivered tree. Ship the target (`include:` or `plugin-extras`) or reword the
   link.
-- **Two files on one path** (shape `skills`, or `merged-plugin`) — a flattening
+- **Two files on one path** (the same layouts) — a flattening
   layout puts the extras of several source plugins into one directory.
   `.mcp.json` and `CONNECTORS.md` files are merged; one MCP server configured
   two ways, or any other two differing files (`connectors/setup.md` in two
   plugins), block the lock. Make them agree in the source, keep the plugins
-  apart (shape `marketplace` without `merged-plugin`), or leave the extras out
+  apart (shape `marketplace` without `flatten`), or leave the extras out
   with `plugin-extras.mcp: false`.
+
+A problem that only some layouts have names the targets it concerns, as in
+`(in acme-plugin.zip)`. Fix it for those; the other targets are unaffected.
+
 - **Upload limits** — a description over 1024 characters, non-string `metadata`,
   or Agensi's file, size or file-type limits. These are fixed in the source.
 
@@ -153,10 +180,12 @@ or loses, not which YAML lines moved:
 | --- | --- |
 | `skills[].id` | A skill ships or stops shipping; `reason` says which include or `requires` chain pulled it |
 | `skills[].files` | A file of a shipped skill appears, disappears or was renamed |
-| `extras`, `generated`, `plugins` | License, MCP extras, generated manifests and READMEs, the delivered plugins and their trimmed `dependencies` |
-| `rewritten`, `unflattened` | Rewrites of the delivered copy; a count changes when a mention is added or removed |
+| `extras` | License and MCP extras |
 | `suggested`, `dangling` | Soft references and their sites; informational |
-| `uploads` | Keys an upload drops, inlined shared material, paths an upload cannot reach |
+| `layouts[]` | One entry per distinct layout, with the `targets` that use it; a new entry means a target was added or changed shape |
+| `layouts[].generated`, `.plugins` | Generated manifests and READMEs, the delivered plugins and their trimmed `dependencies`, in that layout |
+| `layouts[].rewritten`, `.unflattened` | Rewrites of the delivered copy in that layout; a count changes when a mention is added or removed |
+| `layouts[].uploads` | Keys an Agensi pack drops, and paths an upload cannot reach |
 | `target-files` | Files the source repo seeds into a git target, and their ownership class |
 | `profile-digest` | The profile changed |
 
@@ -165,40 +194,31 @@ intended for that recipient. A skill that ships by accident is fixed with
 `exclude:` or by narrowing `include:`, never by editing the lock, which
 `lock --check` would reject.
 
-## Choosing an upload target
+## Uploads
 
-Claude Desktop and claude.ai install an uploaded skill on its own. After a build
-with `skill-upload`, read the lock's `uploads.unresolved` for that target:
-
-- **Empty**: `skill-upload` is right; each skill is self-contained.
-- **Paths listed**: those skills read each other or their plugin's shared
-  material, and those paths break once installed. Recommend `plugin-upload`
-  (needs shape `marketplace`), which keeps a plugin's skills together.
-  `upload.inline-shared: true` repairs only paths into `shared-material/`, not a
-  skill reading another skill.
-
-`skill-upload` also drops frontmatter keys an upload rejects (listed under
-`uploads.dropped-keys`); tell the user which skills lose `user-invocable` or
-similar, since their behavior on claude.ai then differs from Claude Code.
+Claude Desktop and claude.ai take plugins, not single skills: an archive of
+shape `plugin` is the file to upload there. It holds every shipped skill, so
+skills that read each other or their shared material keep working. After
+locking, read `uploads.unresolved` of that layout in the lock: a path listed
+there leads to something that does not ship, and breaks once the plugin is
+installed. Ship its target or reword the path in the source.
 
 ## Delivering
 
-- **Archive and upload targets:** `skillship build <name>` or
+- **Archives and the Agensi pack:** `skillship build <name>` or
   `deliver <name> --target <type>`; output lands in `dist/<name>/`. Name the
-  files and where they get uploaded, and give the user the steps to pass on
-  with a hand-over (from the Claude Code docs; confirm them on the first real
-  hand-over):
+  files and give the user the steps to pass on with a hand-over (from the
+  Claude Code docs and the Plugins page of Claude Desktop and claude.ai;
+  confirm them on the first real hand-over):
 
   | File | The receiver |
   | --- | --- |
-  | Archive of a marketplace | Unzips it to a folder that stays, adds that folder as a marketplace (`/plugin marketplace add <folder>`, or the Marketplaces tab of `/plugins` in VS Code) and installs the plugins. Claude Code loads a local marketplace in place, so moving or deleting the folder breaks them; it does not take the zip itself |
-  | Archive of shape `skills` | Copies the folders under `skills/` into `~/.claude/skills/`, or into a project's `.claude/skills/` |
-  | `<plugin>.zip` of `plugin-upload` | Uploads it in Claude Desktop, or unzips it into `~/.claude/skills/<plugin>/` for Claude Code |
-  | `<skill>.skill` of `skill-upload` | Uploads it in Claude Desktop or claude.ai under *Customize › Skills* |
+  | `<distro>-skills.zip` | Copies the folders under `skills/` into `~/.claude/skills/`, or into a project's `.claude/skills/` |
+  | `<distro>-plugin.zip` | Uploads it in Claude Desktop or claude.ai under *Plugins › Add › Upload plugin*; for Claude Code, unzips it into `~/.claude/skills/<plugin>/` |
+  | `<distro>-marketplace.zip` | Unzips it to a folder that stays, adds that folder as a marketplace (`/plugin marketplace add <folder>`, or the Marketplaces tab of `/plugins` in VS Code) and installs the plugins. Claude Code loads a local marketplace in place, so moving or deleting the folder breaks them; it does not take the zip itself |
 
-  For a one-off hand-over of skills from several plugins, a marketplace with
-  `merged-plugin` is the easiest to receive: one plugin, no dependency between
-  plugins to resolve, and the same content as archive and as upload zip.
+  For a one-off hand-over, the first two cover every receiver: the skills zip
+  for Claude Code and VS Code, the plugin zip for Claude Desktop and claude.ai.
 - **Git targets, locally:** `deliver <name> --dry-run` first: it clones,
   applies, commits and runs the gate in a scratch clone and pushes nothing.
   Report what it would change. Run the real delivery only when asked. `deliver`
@@ -249,11 +269,14 @@ interactive session; see
   of the pinned version, or raise the pin.
 - **`build` refuses the lock**: it is stale; run `lock <name>` and review the
   diff.
-- **"shape `plugins` is now `marketplace`"**, or **"the lock's layout shape …
-  is unknown"**: the profile or lock was written for skillship before 0.7.0.
-  `plugins` becomes `marketplace`; `plugin` with `layout.name` and
-  `layout.description` becomes `marketplace` with
-  `layout.merged-plugin: {name, description}`. Then lock again.
+- **"`layout` now belongs to a target"**, or **"the lock has no layout of …
+  for this target"**: the profile or lock was written for skillship before
+  0.8.0. Move the top-level `layout` under each `archive` or `git` target;
+  `merged-plugin: {name, description}` becomes `flatten: true` with
+  `plugin-name` and `plugin-description`; a `plugin-upload` target becomes an
+  `archive` with `layout: {shape: plugin}`; drop a `skill-upload` target and
+  `upload.inline-shared`. Then lock again. Archives are now named
+  `<distro>-<shape>.zip`.
 - **"the target holds the delivery of distro …"**: one target repo receives one
   distro.
 - **"cannot clone"**: the branch is missing or the credentials do not reach the
