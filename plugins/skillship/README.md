@@ -37,6 +37,8 @@ passes through the conversation.
 - **Drafting** — a distro profile from a one-sentence request
 - **Locking** — the dangling report, one entry at a time, with the profile edit
   or source rewording that fixes it
+- **Guarding** — a check that fails a commit which changes what a recipient
+  receives, as a git hook and in CI
 - **Reviewing** — a lock diff, as what the recipient gains or loses
 - **Shapes** — skills to copy, a plugin to upload or a marketplace to add,
   per target, decided by how the receiver installs it

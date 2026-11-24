@@ -20,6 +20,7 @@ any other Agent Skills–compatible agent.
   - [Declare what each skill requires](#declare-what-each-skill-requires)
   - [Describe a distro](#describe-a-distro)
   - [Lock, build and deliver](#lock-build-and-deliver)
+  - [Check the locks on every commit](#check-the-locks-on-every-commit)
   - [Uploads](#uploads)
   - [Deliver into a git repository](#deliver-into-a-git-repository)
   - [Take recipient changes back](#take-recipient-changes-back)
@@ -257,6 +258,38 @@ plugin's `CONNECTORS.md` while the MCP extras do not ship. `lock` names the fix:
 the `include:` or `plugin-extras` entry that ships the target, or a rewording
 of the link in the source. Links in `templates/` and `examples/` are not
 checked.
+
+### Check the locks on every commit
+
+A lock goes stale without anyone touching a distro: a skill gains a
+`metadata.requires` entry, a new skill matches an `include:` glob, a shipped
+file is renamed. `skillship lock --all --check` catches that, and it belongs
+where every commit passes: a git hook and CI.
+
+The Claude Code plugin of this repository ships a script for it,
+[`check-distro-locks.py`](plugins/skillship/skills/skillship/templates/check-distro-locks.py).
+It needs Python and [uv](https://docs.astral.sh/uv/) or pipx, runs the version
+pinned in `distros/.skillship-version`, takes the repository root as its
+argument, and exits non-zero on a stale lock. Copy it into the source repo and
+run it as a hook, here with [prek](https://prek.j178.dev/) or pre-commit:
+
+```yaml
+- repo: local
+  hooks:
+    - id: distro-locks
+      name: distro locks
+      entry: python scripts/check-distro-locks.py .
+      language: python
+      pass_filenames: false
+      always_run: true
+```
+
+In CI, run the same hooks, or the script as a step of its own. In GitHub
+Actions its report also goes into the job summary.
+
+To check with a skillship that is not released yet, set `SKILLSHIP_FROM` to its
+checkout. The script then runs that working tree instead of the pinned release
+and says so.
 
 ### Uploads
 
@@ -501,8 +534,8 @@ trusted like the workflow that runs it.
 This repository is also a Claude Code plugin marketplace. Its `skillship`
 plugin lets Claude drive the CLI: draft a distro from a sentence, walk through
 the dangling report of `lock`, explain a lock diff, choose each target's shape,
-set up delivery from CI step by step, go through recipient drift, and submit an
-Agensi pack.
+check the locks on every commit, set up delivery from CI step by step, go
+through recipient drift, and submit an Agensi pack.
 
 ```text
 /plugin marketplace add stephaneberle9/skillship

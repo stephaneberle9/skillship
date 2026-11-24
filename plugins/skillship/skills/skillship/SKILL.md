@@ -5,7 +5,7 @@ description: >-
   repository's Agent Skills to a recipient as zips of skills, an uploadable plugin, a
   marketplace, an Agensi pack, or commits to the recipient's repository. Drafts a distro profile
   from a one-sentence request, runs `lock` and walks through the dangling report with the
-  profile edit for each entry, explains a lock diff, picks the shape of each target by how the
+  profile edit for each entry, guards the locks with a check on every commit, explains a lock diff, picks the shape of each target by how the
   receiver installs it, sets up delivery from
   GitHub Actions to a git target step by step (deploy token, a delivery-only signing key, the
   source repo's secrets, a dry run), goes through recipient drift patch by patch, and submits
@@ -171,6 +171,27 @@ A problem that only some layouts have names the targets it concerns, as in
 After it passes, `lock --explain <name>` shows every rewrite of the delivered
 copy; skim it with the user on a first lock. A source edit to fix a mention is a
 change to the source repo, reviewed and committed like any other.
+
+## Checking the locks on every commit
+
+Once a distro is locked, offer to guard its lock: without a check, a lock goes
+stale the first time a shipped skill gains a `requires` entry or a file is
+renamed, and nobody notices until a build refuses it.
+[templates/check-distro-locks.py](templates/check-distro-locks.py) runs
+`lock --all --check` at the pinned version and fails on a stale lock. Copy it
+unchanged and wire it in where the repository already runs its checks:
+
+| The repository has | Do this |
+| --- | --- |
+| The plugin checks (`scripts/plugin-checks/run-plugin-checks.py`) | Copy the script to `scripts/plugin-checks/local/`. The runner calls every `local/check-*.py` before a commit and in CI |
+| Git hooks through prek or pre-commit, without the plugin checks | Copy it to `scripts/`, and add the local hook the README shows under *Check the locks on every commit* |
+| Neither | Copy it to `scripts/` and add `python scripts/check-distro-locks.py .` as a CI step; say that nothing checks before a commit |
+
+It needs `distros/.skillship-version` (see *Ground rules*) and uv or pipx. Run
+it once after wiring it in and show the result. With `SKILLSHIP_FROM` set to a
+skillship checkout it runs that working tree instead of the pinned release;
+that is for trying an unreleased skillship, never a setting to commit or to
+give a CI job.
 
 ## Explaining a lock diff
 
