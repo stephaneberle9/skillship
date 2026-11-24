@@ -37,10 +37,15 @@ HANDOVER_RECIPIENTS = {
 
 def default_recipient(targets: list[dict[str, Any]]) -> str | None:
     """The recipient of a profile without one, or None when its targets need one named."""
-    types = [t.get("type") for t in targets]
-    if not types or any(t not in HANDOVER_RECIPIENTS for t in types):
+    ways: list[str] = []
+    for target in targets:
+        way = HANDOVER_RECIPIENTS.get(str(target.get("type")))
+        if way is None:
+            return None
+        if way not in ways:
+            ways.append(way)
+    if not ways:
         return None
-    ways = list(dict.fromkeys(HANDOVER_RECIPIENTS[t] for t in types))
     return "Early adopters, " + ", and ".join(ways)
 
 

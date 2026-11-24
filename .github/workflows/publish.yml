@@ -5,8 +5,19 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The checks of the commit being released, run again here. A release can be
+  # created from any tag, whatever the state of that commit's own checks, so
+  # without these jobs a red commit can be published.
+  static_checks:
+    uses: ./.github/workflows/run-static-checks.yml
+  run_tests:
+    uses: ./.github/workflows/run-tests.yml
+  run_tests_lowest:
+    uses: ./.github/workflows/run-tests-lowest.yml
+
   pypi-publish:
     name: Upload to PyPI
+    needs: [static_checks, run_tests, run_tests_lowest]
     runs-on: ubuntu-latest
     permissions:
       id-token: write # For PyPI's trusted publishing

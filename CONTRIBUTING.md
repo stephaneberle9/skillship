@@ -128,8 +128,9 @@ Fork the repository and follow the same procedure as above.
    ```
 
 3. Create a GitHub release from the tag and add release notes. Publishing the
-   release triggers the `publish.yml` workflow, which builds the packages and
-   uploads them to PyPI.
+   release triggers the `publish.yml` workflow, which runs the static checks
+   and both test workflows on the tagged commit, then builds the packages and
+   uploads them to PyPI only when all of them pass.
 
 ### Testing a release first
 
