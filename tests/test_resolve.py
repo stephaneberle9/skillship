@@ -121,7 +121,8 @@ def test_excluding_a_required_skill_names_the_chain(source):
     )
     assert res.errors == [
         (
-            "`ledger:ledger-rules` is excluded, but ships: `ledger:ledger-rules` <- "
+            "`ledger:ledger-rules` is excluded, but a shipped skill requires it: "
+            "`ledger:ledger-rules` <- "
             "`ledger:ledger-knowledge` <- `billing:invoice-knowledge` <- `billing:invoice-export` "
             "(include billing:invoice-export)"
         )
@@ -134,8 +135,27 @@ def test_patterns_that_match_nothing_fail(source):
         "recipient: ACME\ninclude: [billing:nothing-*]\nexclude: [ledger:gone]\n",
     )
     assert res.errors == [
-        "`include: billing:nothing-*` matches no skill",
         "`exclude: ledger:gone` matches no skill",
+        "`include: billing:nothing-*` matches no skill",
+    ]
+
+
+def test_exclude_takes_a_skill_out_of_what_an_include_glob_matches(source):
+    _, res = resolved(
+        source,
+        "recipient: ACME\ninclude: ['ledger:ledger-*']\nexclude: [ledger:ledger-audit]\n",
+    )
+    assert res.errors == []
+    assert sorted(res.skills) == ["ledger:ledger-knowledge", "ledger:ledger-rules"]
+
+
+def test_an_include_that_exclude_empties_is_refused(source):
+    _, res = resolved(
+        source,
+        "recipient: ACME\ninclude: [ledger:tax-report]\nexclude: ['ledger:tax-*']\n",
+    )
+    assert res.errors == [
+        "`include: ledger:tax-report` matches only skills that `exclude` takes out"
     ]
 
 

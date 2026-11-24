@@ -109,6 +109,11 @@ targets:
       shape: marketplace
 ```
 
+`include` selects skills, and everything they require comes along. `exclude`
+names skills that must never reach this recipient: it takes them out of what
+`include` matches, as in a glob with one exception. It cannot take out what a
+shipped skill requires; the lock fails then, and names the chain.
+
 What ships is stated once, for the whole distro. How it is laid out is stated
 per target, so one distro can go out in several forms at once: here as a zip of
 skills, as a plugin to upload, and as a marketplace in ACME's repository.

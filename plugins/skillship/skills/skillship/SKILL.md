@@ -141,8 +141,10 @@ apply a batch blind:
   - a rewording in the source when the mention is wrong everywhere, for example
     missing the "when installed" a soft reference needs (that makes it
     `conditional`, and fixes every distro at once);
-  - `exclude:` only to keep a skill out that an `include` glob matches. An
-    excluded skill that something requires fails the lock, which is the point.
+  - `exclude:` to keep a skill out that an `include` glob matches. It cannot
+    take out what a shipped skill requires: the lock fails then and names the
+    chain, and the requirement has to change in the source first (`requires`
+    to `suggests`, where the skill works without it).
 - **Unflattened plugin mention** (any flattening layout: `skills`, `plugin`, a
   marketplace with `flatten`) — prose names a
   source plugin in a phrasing flattening does not rewrite. Reword the source
@@ -191,8 +193,8 @@ or loses, not which YAML lines moved:
 
 Then recompute with `lock <name>` and let the user decide whether the change is
 intended for that recipient. A skill that ships by accident is fixed with
-`exclude:` or by narrowing `include:`, never by editing the lock, which
-`lock --check` would reject.
+`exclude:` or by narrowing `include:`, or in the source when a shipped skill
+requires it, never by editing the lock, which `lock --check` would reject.
 
 ## Uploads
 

@@ -19,7 +19,7 @@
       "minItems": 1
     },
     "exclude": {
-      "description": "Skills never to deliver. Resolving fails when an included skill is excluded or requires one.",
+      "description": "Skills never to deliver. They are taken out of what `include` matches; resolving fails when a shipped skill requires one.",
       "$ref": "#/$defs/patterns"
     },
     "acknowledge": {

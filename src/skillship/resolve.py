@@ -136,10 +136,23 @@ class Resolution:
 def resolve(repo: SourceRepo, profile: Profile) -> Resolution:
     res = Resolution()
     queue: deque[str] = deque()
-    for pattern in profile.include:
+    # `exclude` takes skills out of what `include` matches; what a shipped skill
+    # requires cannot be taken out, and fails below
+    excluded: set[str] = set()
+    for pattern in profile.exclude:
         ids = repo.match(pattern)
         if not ids:
+            res.errors.append(f"`exclude: {pattern}` matches no skill")
+        excluded |= set(ids)
+    for pattern in profile.include:
+        matched = repo.match(pattern)
+        ids = [sid for sid in matched if sid not in excluded]
+        if not matched:
             res.errors.append(f"`include: {pattern}` matches no skill")
+        elif not ids:
+            res.errors.append(
+                f"`include: {pattern}` matches only skills that `exclude` takes out"
+            )
         for sid in ids:
             if sid not in res.skills:
                 res.skills[sid] = f"include {pattern}"
@@ -152,13 +165,10 @@ def resolve(repo: SourceRepo, profile: Profile) -> Resolution:
                 res.parent[dep] = sid
                 queue.append(dep)
 
-    for pattern in profile.exclude:
-        ids = repo.match(pattern)
-        if not ids:
-            res.errors.append(f"`exclude: {pattern}` matches no skill")
-        for sid in ids:
-            if sid in res.skills:
-                res.errors.append(f"`{sid}` is excluded, but ships: {_chain(res, sid)}")
+    for sid in sorted(excluded & set(res.skills)):
+        res.errors.append(
+            f"`{sid}` is excluded, but a shipped skill requires it: {_chain(res, sid)}"
+        )
 
     for sid in res.skills:
         res.files[sid] = repo.files(repo.skills[sid], profile.file_excludes)
